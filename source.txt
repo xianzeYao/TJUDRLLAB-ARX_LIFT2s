@@ -4,6 +4,11 @@ export LD_LIBRARY_PATH=$(pwd)/bimanual/api:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
 # 底盘接口
+# 左移-1.0，持续1s
+arx_nav_robot.run_for_1s(chy=-1.0, duration=1.0)
+
+# 右移1.0，持续1s
+arx_nav_robot.run_for_1s(chy=1.0, duration=1.0)
 
 # demo虚拟环境
 source demo/bin/activate
@@ -12,10 +17,10 @@ source demo/bin/activate
 colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 
 # ros2工作区source
-source /home/arx/Arx_Lift/src/body/ROS2/install/setup.bash
+source /home/arx/Arx_Lift2s/Src/LIFT/body/ROS2/install/setup.bash
 
 # pick demo运行
-source /home/arx/Arx_Lift/src/body/ROS2/install/setup.bash
+source home/arx/Arx_Lift2s/Src/LIFT/ROS2/install/setup.bash
 source demo/bin/activate
 
 # prompt
