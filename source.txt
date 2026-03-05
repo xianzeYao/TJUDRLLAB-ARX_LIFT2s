@@ -1,0 +1,44 @@
+# 双臂py接口
+export LD_LIBRARY_PATH=$(pwd)/bimanual/api/arx_x5_src:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$(pwd)/bimanual/api:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+
+# 底盘接口
+
+# demo虚拟环境
+source demo/bin/activate
+
+# ros2工作区build
+colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+
+# ros2工作区source
+source /home/arx/Arx_Lift/src/body/ROS2/install/setup.bash
+
+# pick demo运行
+source /home/arx/Arx_Lift/src/body/ROS2/install/setup.bash
+source demo/bin/activate
+
+# prompt
+pick_prompt = "a middle and center position of the highest cup"
+place_prompt = "the farthest black dot at the center of a white round coaster"
+plaaning_pick_place_prompt = """Point out Purple cup and the coaster with the label of number 3"""
+planning_pick_prompt = """Given an RGB image, output the minimal sequence of cup pick actions required to finally pick the red cup.
+
+                        Rules:
+                        - A cup can only be picked if no other cup is placed on top of it.
+                        - A cup that is partially or fully occluded by another cup is NOT pickable.
+                        - If the goal cup is not immediately pickable, you must first pick the cups that block it.
+                        - The order of pick actions is the actual execution order.
+
+                        For each pick action, provide one valid 2D pick point on the middle center of the cup.
+
+                        Output ONLY a JSON array in execution order:
+                        [
+                        {
+                            "point_2d": [x, y]
+                        }
+                        ]"""
+
+plannig_place_prompt = """"1. Point to top of the xxx cup.
+                           2. Point to top of the xxx cup.
+                           - Output the pixel coordinates of the center points."""
