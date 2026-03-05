@@ -1,0 +1,28 @@
+.DS_Store
+
+# Python cache and virtual envs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# ROS build artifacts
+build/
+devel/
+install/
+log/
+
+# Special
+Demo/Testdata4mani
+Demo/Testdata4Nav
+Demo/Video4demo

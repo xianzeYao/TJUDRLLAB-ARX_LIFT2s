@@ -1,0 +1,3 @@
+[submodule "Src/LIFT"]
+	path = Src/LIFT
+	url = git@github.com:xianzeYao/TJURLLAB-ARX_LIFT.git
