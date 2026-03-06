@@ -49,7 +49,7 @@ def ask_point(color: np.ndarray, prompt: str) -> tuple[Optional[tuple[int, int]]
             base_url="http://172.28.102.11:22002/v1",
             model_name="Embodied-R1.5-SFT-0128",
             api_key="EMPTY",
-            assume_bgr=True,
+            assume_bgr=False,
             temperature=0.0,
             max_tokens=128,
             return_raw=True,
