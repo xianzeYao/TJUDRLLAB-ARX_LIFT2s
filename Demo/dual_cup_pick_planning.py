@@ -177,7 +177,7 @@ def dual_arm_pick_planning(
         cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
 
         while True:
-            frames = arx.node.get_camera(
+            frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             if color is None:
@@ -240,7 +240,7 @@ def dual_arm_pick_planning(
             if step_idx != 0:
                 arx.step_lift(13.5)
                 time.sleep(1.0)
-            frames = arx.node.get_camera(
+            frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             depth = frames.get("camera_h_aligned_depth_to_color")

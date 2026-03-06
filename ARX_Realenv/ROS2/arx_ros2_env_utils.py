@@ -260,7 +260,7 @@ class RobotIO(Node):
                                     [cv2.IMWRITE_PNG_COMPRESSION, 0])
                     else:
                         cv2.imwrite(base + ".png", img,
-                                    [cv2.IMWRITE_JPEG_QUALITY, 90])
+                                    [cv2.IMWRITE_PNG_COMPRESSION, 0])
             except Exception as exc:  # pragma: no cover
                 try:
                     self.get_logger().warn(f"save {key} failed: {exc}")
@@ -428,6 +428,7 @@ def _quat_normalize(q: np.ndarray) -> np.ndarray:
 
 
 def _quat_from_rpy(rpy: np.ndarray) -> np.ndarray:
+    """将 roll/pitch/yaw 转成归一化四元数，便于做姿态插值。"""
     roll, pitch, yaw = [float(x) for x in rpy]
     cr = np.cos(roll * 0.5)
     sr = np.sin(roll * 0.5)
@@ -443,6 +444,7 @@ def _quat_from_rpy(rpy: np.ndarray) -> np.ndarray:
 
 
 def _rpy_from_quat(q: np.ndarray) -> np.ndarray:
+    """将插值后的四元数再转回 roll/pitch/yaw。"""
     q = _quat_normalize(q)
     x, y, z, w = [float(v) for v in q]
     sinr_cosp = 2.0 * (w * x + y * z)
@@ -462,6 +464,7 @@ def _rpy_from_quat(q: np.ndarray) -> np.ndarray:
 
 
 def _quat_slerp(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
+    """球面线性插值，避免直接线性插值 RPY 带来的姿态跳变。"""
     q0 = _quat_normalize(q0)
     q1 = _quat_normalize(q1)
     dot = float(np.dot(q0, q1))
@@ -480,6 +483,7 @@ def _quat_slerp(q0: np.ndarray, q1: np.ndarray, t: float) -> np.ndarray:
 
 
 def _quat_angle(q0: np.ndarray, q1: np.ndarray) -> float:
+    """计算两个姿态之间的最短角距离，单位是弧度。"""
     q0 = _quat_normalize(q0)
     q1 = _quat_normalize(q1)
     dot = float(np.dot(q0, q1))
@@ -488,6 +492,7 @@ def _quat_angle(q0: np.ndarray, q1: np.ndarray) -> float:
 
 
 def _trapezoid_params(d: float, v_max: float, a_max: float) -> tuple[float, float, float, float]:
+    """根据位移、速度上限、加速度上限，计算梯形/三角速度曲线各阶段时长。"""
     if d <= 0.0:
         return 0.0, 0.0, 0.0, 0.0
     v_max = max(float(v_max), 1e-6)
@@ -495,6 +500,7 @@ def _trapezoid_params(d: float, v_max: float, a_max: float) -> tuple[float, floa
     t_accel = v_max / a_max
     d_accel = 0.5 * a_max * t_accel * t_accel
     if d <= 2.0 * d_accel:
+        # 位移太短时达不到 v_max，会退化成三角速度曲线。
         t_accel = np.sqrt(d / a_max)
         v_peak = a_max * t_accel
         total = 2.0 * t_accel
@@ -505,6 +511,7 @@ def _trapezoid_params(d: float, v_max: float, a_max: float) -> tuple[float, floa
 
 
 def _trapezoid_position(t: float, d: float, v_max: float, a_max: float) -> float:
+    """给定时刻 t，返回该梯形速度曲线下已经走过的距离。"""
     if d <= 0.0:
         return 0.0
     total, t_accel, t_flat, v_peak = _trapezoid_params(d, v_max, a_max)
@@ -528,6 +535,7 @@ def _trapezoid_position(t: float, d: float, v_max: float, a_max: float) -> float
 
 
 def _trapezoid_fraction(t: float, d: float, v_max: float, a_max: float) -> float:
+    """将时刻 t 映射成 0..1 的插值进度。"""
     if d <= 0.0:
         return 1.0
     pos = _trapezoid_position(t, d, v_max, a_max)
@@ -540,7 +548,7 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
                           limits: Dict[str, Dict[str, Optional[float]]],
                           min_steps: int,
                           ) -> Dict[str, list[np.ndarray]]:
-    """Plan sequences for both arms with constrained mode."""
+    """在 xyz/rpy 的速度、加速度约束下，为双臂规划逐步执行的末端目标序列。"""
     v_xyz = limits["xyz"]["v"]
     a_xyz = limits["xyz"]["a"]
     v_rpy = limits["rpy"]["v"]
@@ -575,10 +583,12 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
         start_pose = np.array(curr_end, dtype=np.float32)
         start_grip = curr_gripper
         delta_xyz = target[:3] - start_pose[:3]
+        # 用笛卡尔位移中变化最大的那个轴，作为平移梯形曲线的标量距离。
         d_xyz = float(np.max(np.abs(delta_xyz)))
 
         q0 = _quat_from_rpy(start_pose[3:6])
         q1 = _quat_from_rpy(target[3:6])
+        # 姿态距离在四元数空间中计算，插值完成后再转回 RPY。
         d_rpy = float(_quat_angle(q0, q1))
 
         delta_g = float(target[6]) - start_grip
@@ -588,6 +598,7 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
             0] if d_xyz > eps_xyz else 0.0
         t_rpy = _trapezoid_params(d_rpy, v_rpy, a_rpy)[
             0] if d_rpy > eps_rpy else 0.0
+        # 平移和旋转谁更慢，就由谁决定整段动作需要多少控制周期。
         steps_xyz = int(np.ceil(t_xyz / dt)) if t_xyz > 0 else 0
         steps_rpy = int(np.ceil(t_rpy / dt)) if t_rpy > 0 else 0
         pose_steps = max(steps_xyz, steps_rpy)
@@ -596,6 +607,7 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
 
         if d_g > eps_grip:
             if pose_steps > 0:
+                # 默认让夹爪比整段位姿动作更早完成。
                 grip_steps = max(
                     1, int(np.ceil(pose_steps * grip_finish_ratio)))
             else:
@@ -611,6 +623,7 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
         seq: list[np.ndarray] = []
         for i in range(max_steps):
             t = (i + 1) * dt
+            # 分别把当前时刻换算成平移和旋转的插值进度。
             if d_xyz > eps_xyz:
                 s_xyz = _trapezoid_fraction(t, d_xyz, v_xyz, a_xyz)
             else:
@@ -633,6 +646,7 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
                 s_grip = 1.0
 
             grip_val = start_grip + delta_g * s_grip
+            # 每一步的格式为 [x, y, z, roll, pitch, yaw, gripper]。
             seq.append(np.concatenate([pos_xyz, pos_rpy, [grip_val]]))
         results[side] = seq
 

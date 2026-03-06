@@ -67,7 +67,7 @@ def _get_frames(
     depth_median_n: int = 1,
     target_size: Tuple[int, int] = (640, 480),
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    frames = arx.node.get_camera(target_size=target_size, return_status=False)
+    frames = arx.get_camera(target_size=target_size, return_status=False)
     color = frames.get("camera_h_color")
     depth = frames.get("camera_h_aligned_depth_to_color")
     if depth_median_n <= 1:
@@ -77,7 +77,7 @@ def _get_frames(
     if depth is not None:
         depths.append(depth)
     for _ in range(depth_median_n - 1):
-        frames = arx.node.get_camera(
+        frames = arx.get_camera(
             target_size=target_size, return_status=False)
         d = frames.get("camera_h_aligned_depth_to_color")
         if d is not None:

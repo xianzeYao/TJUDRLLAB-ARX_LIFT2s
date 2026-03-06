@@ -145,7 +145,7 @@ def dual_arm_pick_planning_parallel(
         cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
 
         while True:
-            frames = arx.node.get_camera(
+            frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             if color is None:
@@ -205,7 +205,7 @@ def dual_arm_pick_planning_parallel(
         while planned and plan_steps:
             arx.step_lift(13.0)
             time.sleep(1.0)
-            frames = arx.node.get_camera(
+            frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             depth = frames.get("camera_h_aligned_depth_to_color")
@@ -215,7 +215,7 @@ def dual_arm_pick_planning_parallel(
             if depth_median_n > 1:
                 depths = [depth]
                 for _ in range(depth_median_n - 1):
-                    frames = arx.node.get_camera(
+                    frames = arx.get_camera(
                         target_size=(640, 480), return_status=False)
                     d = frames.get("camera_h_aligned_depth_to_color")
                     if d is not None:

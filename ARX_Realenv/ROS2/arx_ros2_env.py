@@ -20,7 +20,6 @@ class ARXRobotEnv():
     def __init__(self, duration_per_step: float = 0.02, min_steps: int = 10,
                  max_v_xyz: float = 0.25, max_v_rpy: float = 0.3,
                  max_a_xyz: float = 0.20, max_a_rpy: float = 1.00,
-                 max_j_xyz: Optional[float] = None, max_j_rpy: Optional[float] = None,
                  camera_type: Literal["color", "depth", "all"] = "all", camera_view: Iterable[str] = ("camera_l", "camera_h", "camera_r"),
                  dir: Optional[str] = None, video: bool = False, video_fps: float = 20.0,
                  video_name: Optional[str] = None,
@@ -40,8 +39,6 @@ class ARXRobotEnv():
         self.max_v_rpy = max_v_rpy
         self.max_a_xyz = max_a_xyz
         self.max_a_rpy = max_a_rpy
-        self.max_j_xyz = max_j_xyz
-        self.max_j_rpy = max_j_rpy
 
         # 1. Enable the robot
         success, error_message = self._enable_robot()
@@ -133,10 +130,12 @@ class ARXRobotEnv():
         save_dir: 默认 None 时沿用实例化时的 self.dir；显式传值覆盖；传入空串/False 可关闭保存。
         video: 默认 None 时沿用实例化时的 self.video；True 保存视频，False 保存图片。
         """
-        real_save_dir = self.dir if save_dir is None else save_dir
-        real_video = self.video if video is None else video
-        camera_all, status_all = self.node.get_camera(
-            save_dir=real_save_dir, target_size=self.img_size, save_video=real_video, return_status=True)
+        camera_all, status_all = self.get_camera(
+            save_dir=save_dir,
+            video=video,
+            target_size=self.img_size,
+            return_status=True,
+        )
         obs = build_observation(
             camera_all, status_all,
             include_arm=include_arm,
@@ -150,6 +149,31 @@ class ARXRobotEnv():
                 pass
             raise RuntimeError("Empty observation, node shutdown.")
         return obs
+
+    def get_camera(self,
+                   save_dir: Optional[str] = None,
+                   video: Optional[bool] = None,
+                   target_size: Optional[Tuple[int, int]] = None,
+                   return_status: bool = False):
+        """
+        环境层统一相机入口。
+
+        业务代码优先通过 env.get_camera()/env.get_observation() 取数据，
+        不要直接下钻到 env.node.get_camera()。
+        """
+        real_save_dir = self.dir if save_dir is None else save_dir
+        real_video = self.video if video is None else video
+        real_target_size = self.img_size if target_size is None else target_size
+        return self.node.get_camera(
+            save_dir=real_save_dir,
+            target_size=real_target_size,
+            save_video=real_video,
+            return_status=return_status,
+        )
+
+    def get_robot_status(self):
+        """环境层统一状态入口，屏蔽底层 node 接口。"""
+        return self.node.get_robot_status()
 
     def close(self):
         """
@@ -174,7 +198,7 @@ class ARXRobotEnv():
     def _apply_lift(self, height: float) -> Tuple[bool, str | None]:
         """Internal: move base height with incremental steps."""
         msg = PosCmd()
-        base_status = self.node.get_robot_status().get("base")
+        base_status = self.get_robot_status().get("base")
         if base_status is None:
             return (False, "base status unavailable")
         curr = float(base_status.height)
@@ -199,7 +223,7 @@ class ARXRobotEnv():
             msg.chx = vx
             msg.chy = vy
             msg.chz = vz
-            base_status = self.node.get_robot_status().get("base")
+            base_status = self.get_robot_status().get("base")
             msg.height = float(
                 base_status.height) if base_status is not None else 0.0
             msg.mode1 = 1
@@ -222,8 +246,8 @@ class ARXRobotEnv():
         """
         curr_obs = self.get_observation()
         limits = {
-            "xyz": {"v": self.max_v_xyz, "a": self.max_a_xyz, "j": self.max_j_xyz},
-            "rpy": {"v": self.max_v_rpy, "a": self.max_a_rpy, "j": self.max_j_rpy},
+            "xyz": {"v": self.max_v_xyz, "a": self.max_a_xyz},
+            "rpy": {"v": self.max_v_rpy, "a": self.max_a_rpy},
         }
         sequences = plan_action_sequences(
             curr_obs,

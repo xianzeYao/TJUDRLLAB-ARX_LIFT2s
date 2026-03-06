@@ -64,7 +64,7 @@ def _predict_two_points(
 
 def _get_frame(arx: ARXRobotEnv, depth_median_n: int = 10) -> Tuple[np.ndarray, np.ndarray]:
     while True:
-        frames = arx.node.get_camera(
+        frames = arx.get_camera(
             target_size=(640, 480), return_status=False)
         color = frames.get("camera_h_color")
         depth = frames.get("camera_h_aligned_depth_to_color")
@@ -75,7 +75,7 @@ def _get_frame(arx: ARXRobotEnv, depth_median_n: int = 10) -> Tuple[np.ndarray, 
             return color, depth
         depths = [depth]
         for _ in range(depth_median_n - 1):
-            frames = arx.node.get_camera(
+            frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             d = frames.get("camera_h_aligned_depth_to_color")
             if d is not None:
