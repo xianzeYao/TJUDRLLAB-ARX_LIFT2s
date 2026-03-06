@@ -21,6 +21,7 @@ from arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
 FIXED_STEPS_PER_LAYER = 3
+DEFAULT_CENTER_REGION_RATIO = 0.6
 
 
 class UserAbortSearch(Exception):
@@ -37,6 +38,30 @@ def get_color_frame(arx: ARXRobotEnv) -> np.ndarray:
         if color is not None:
             return color
         time.sleep(0.05)
+
+
+def ask_point(color: np.ndarray, prompt: str) -> tuple[Optional[tuple[int, int]], Optional[str]]:
+    try:
+        points, raw = predict_multi_points_from_rgb(
+            image=color,
+            text_prompt="",
+            all_prompt=prompt,
+            base_url="http://172.28.102.11:22002/v1",
+            model_name="Embodied-R1.5-SFT-0128",
+            api_key="EMPTY",
+            assume_bgr=True,
+            temperature=0.0,
+            max_tokens=128,
+            return_raw=True,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"ER1.5 call failed: {exc}") from exc
+
+    if not points:
+        return None, raw
+
+    u, v = points[0]
+    return (int(round(u)), int(round(v))), raw
 
 
 def parse_bool(text: str) -> Optional[bool]:
@@ -78,32 +103,28 @@ def ask_bool(color: np.ndarray, prompt: str) -> bool:
     return parsed
 
 
-def _wrap_text(text: str, width: int = 56) -> list[str]:
-    words = text.split()
-    if not words:
-        return [""]
-    lines: list[str] = []
-    cur = words[0]
-    for w in words[1:]:
-        if len(cur) + 1 + len(w) <= width:
-            cur += " " + w
-        else:
-            lines.append(cur)
-            cur = w
-    lines.append(cur)
-    return lines
-
-
 def _show_debug_result(
     color: np.ndarray,
-    title: str,
-    prompt: str,
     result: bool,
+    bool_result: bool,
+    point: Optional[tuple[int, int]],
+    bounds: tuple[int, int, int, int],
+    center_region_ratio: float,
 ) -> int:
     vis = color.copy()
-    lines = [f"Type: {title}", f"Result: {result}",
-             "Key: r=refresh, q=quit, others=accept", "Prompt:"]
-    lines.extend(_wrap_text(prompt))
+    left, top, right, bottom = bounds
+    box_color = (0, 255, 0) if result else (0, 0, 255)
+    cv2.rectangle(vis, (left, top), (right, bottom), box_color, 2)
+    if point is not None:
+        cv2.circle(vis, point, 4, box_color, -1)
+
+    point_text = "None" if point is None else f"({point[0]}, {point[1]})"
+    lines = [
+        f"Check: {bool_result}",
+        f"Result: {result}",
+        f"Point: {point_text}",
+        f"Center box: {center_region_ratio:.0%}",
+    ]
     y = 28
     for line in lines:
         cv2.putText(
@@ -122,22 +143,54 @@ def _show_debug_result(
     return cv2.waitKey(0) & 0xFF
 
 
-def query_bool_with_debug(
+def _center_region_bounds(
+    color: np.ndarray, ratio: float = DEFAULT_CENTER_REGION_RATIO
+) -> tuple[int, int, int, int]:
+    h, w = color.shape[:2]
+    half_w = int(round(w * ratio / 2.0))
+    half_h = int(round(h * ratio / 2.0))
+    cx, cy = w // 2, h // 2
+    left = max(0, cx - half_w)
+    top = max(0, cy - half_h)
+    right = min(w - 1, cx + half_w)
+    bottom = min(h - 1, cy + half_h)
+    return left, top, right, bottom
+
+
+def _point_in_bounds(
+    point: Optional[tuple[int, int]], bounds: tuple[int, int, int, int]
+) -> bool:
+    if point is None:
+        return False
+    u, v = point
+    left, top, right, bottom = bounds
+    return left <= u <= right and top <= v <= bottom
+
+
+def query_target_with_debug(
     arx: ARXRobotEnv,
-    prompt: str,
-    debug_title: str,
+    bool_prompt: str,
+    point_prompt: str,
     debug_scan: bool,
+    center_region_ratio: float,
 ) -> bool:
     while True:
         color = get_color_frame(arx)
-        result = ask_bool(color, prompt)
+        bool_result = ask_bool(color, bool_prompt)
+        point = None
+        bounds = _center_region_bounds(color, ratio=center_region_ratio)
+        if bool_result:
+            point, _ = ask_point(color, point_prompt)
+        result = bool_result and _point_in_bounds(point, bounds)
         if not debug_scan:
             return result
         key = _show_debug_result(
             color=color,
-            title=debug_title,
-            prompt=prompt,
             result=result,
+            bool_result=bool_result,
+            point=point,
+            bounds=bounds,
+            center_region_ratio=center_region_ratio,
         )
         if key == ord("r"):
             continue
@@ -146,11 +199,21 @@ def query_bool_with_debug(
         return result
 
 
-def target_prompt(object_desc: str) -> str:
+def target_bool_prompt(object_desc: str) -> str:
     safe_desc = object_desc.replace('"', '\\"')
     return (
         f'Is there an object matching this description: "{safe_desc}"? '
         "Output only True or False."
+    )
+
+
+def target_point_prompt(object_desc: str) -> str:
+    safe_desc = object_desc.replace('"', '\\"')
+    return (
+        "Provide exactly one point coordinate of the object region matching this description: "
+        f'"{safe_desc}". '
+        'If no such object exists, return []. Format: [{"point_2d": [x, y]}]. '
+        "Return only JSON."
     )
 
 
@@ -164,7 +227,7 @@ def on_target_found(arx: ARXRobotEnv, object_desc: str) -> bool:
         reset_robot=False,
         close_robot=False,
         debug=True,
-        go_home=True,
+        go_home=False,
         depth_median_n=10,
     )
     if pick_ref is None and place_ref is None:
@@ -173,12 +236,19 @@ def on_target_found(arx: ARXRobotEnv, object_desc: str) -> bool:
     return True
 
 
-def _check_target(arx: ARXRobotEnv, prompt: str, debug_scan: bool) -> bool:
-    return query_bool_with_debug(
+def _check_target(
+    arx: ARXRobotEnv,
+    bool_prompt: str,
+    point_prompt: str,
+    debug_scan: bool,
+    center_region_ratio: float,
+) -> bool:
+    return query_target_with_debug(
         arx=arx,
-        prompt=prompt,
-        debug_title="Target check (layer)",
+        bool_prompt=bool_prompt,
+        point_prompt=point_prompt,
         debug_scan=debug_scan,
+        center_region_ratio=center_region_ratio,
     )
 
 
@@ -186,8 +256,10 @@ def _scan_direction(
     arx: ARXRobotEnv,
     object_prompt: str,
     vy: float,
-    obj_prompt: str,
+    obj_bool_prompt: str,
+    obj_point_prompt: str,
     debug_scan: bool,
+    center_region_ratio: float,
 ) -> bool:
     vx, vz = 0.0, 0.0
     move_duration = 1.0
@@ -195,11 +267,12 @@ def _scan_direction(
     for _ in range(FIXED_STEPS_PER_LAYER):
         arx.step_base(vx=vx, vy=vy, vz=vz, duration=move_duration)
 
-        if query_bool_with_debug(
+        if query_target_with_debug(
             arx=arx,
-            prompt=obj_prompt,
-            debug_title="Target check after move",
+            bool_prompt=obj_bool_prompt,
+            point_prompt=obj_point_prompt,
             debug_scan=debug_scan,
+            center_region_ratio=center_region_ratio,
         ):
             print("True")
             if on_target_found(arx, object_prompt):
@@ -214,6 +287,7 @@ def search_shelf(
     v: float,
     drop_height: float,
     max_layer: int,
+    center_region_ratio: float = DEFAULT_CENTER_REGION_RATIO,
     reset_robot: bool = True,
     close_robot: bool = False,
     debug_scan: bool = False,
@@ -222,6 +296,8 @@ def search_shelf(
         raise ValueError("max_layer must be > 0")
     if drop_height <= 0:
         raise ValueError("drop_height must be > 0")
+    if not 0.0 < center_region_ratio <= 1.0:
+        raise ValueError("center_region_ratio must be in (0, 1]")
     start_height = 20.0
 
     try:
@@ -230,9 +306,16 @@ def search_shelf(
         arx.step_lift(start_height)
         current_height = start_height
         layer_index = 1
-        obj_prompt = target_prompt(object_prompt)
+        obj_bool_prompt = target_bool_prompt(object_prompt)
+        obj_point_prompt = target_point_prompt(object_prompt)
 
-        if _check_target(arx, obj_prompt, debug_scan=debug_scan):
+        if _check_target(
+            arx,
+            obj_bool_prompt,
+            obj_point_prompt,
+            debug_scan=debug_scan,
+            center_region_ratio=center_region_ratio,
+        ):
             print("True")
             if on_target_found(arx, object_prompt):
                 return True
@@ -244,8 +327,10 @@ def search_shelf(
                 arx,
                 object_prompt,
                 vy=curr_vy,
-                obj_prompt=obj_prompt,
+                obj_bool_prompt=obj_bool_prompt,
+                obj_point_prompt=obj_point_prompt,
                 debug_scan=debug_scan,
+                center_region_ratio=center_region_ratio,
             )
             if layer_hit:
                 return True
@@ -258,7 +343,13 @@ def search_shelf(
             arx.step_lift(current_height)
             layer_index += 1
 
-            if _check_target(arx, obj_prompt, debug_scan=debug_scan):
+            if _check_target(
+                arx,
+                obj_bool_prompt,
+                obj_point_prompt,
+                debug_scan=debug_scan,
+                center_region_ratio=center_region_ratio,
+            ):
                 print("True")
                 if on_target_found(arx, object_prompt):
                     return True
@@ -289,6 +380,7 @@ def main() -> None:
         v=1.0,
         drop_height=10.0,
         max_layer=3,
+        center_region_ratio=0.4,
         reset_robot=True,
         close_robot=True,
         debug_scan=True,
@@ -297,7 +389,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-# TODO 现在把check 有无和打点的逻辑合并一下，如果check有则进入一次打点，调用。然后对于现在的例子(640,480)的图，然后取一个长方形区域，这个长方形中心就在（320，240）然后加一个参数，比如60%，然后相当于得到四条边界。如果check有，且打的点在这个长方形里面，则显示绿色的，即原来的那个逻辑
-# TODO 现在check就利用打点，如果没有点，就直接返回False，如果有点了，再看这个点在不在中心区域（然后对于现在的例子(640,480)的图，然后取一个长方形区域，这个长方形中心就在（320，240）然后加一个参数，比如60%，然后相当于得到四条边界），如果在中心区域才返回True，否则返回False，并且显示红色。
 
 # TODO 扫到有就停着左右动
