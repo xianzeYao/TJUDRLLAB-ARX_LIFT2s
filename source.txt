@@ -15,7 +15,7 @@ colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 source /home/arx/Arx_Lift2s/Src/LIFT/body/ROS2/install/setup.bash
 
 # pick demo运行
-source home/arx/Arx_Lift2s/Src/LIFT/ROS2/install/setup.bash
+source home/arx/Arx_Lift2s/Src/LIFT/body/ROS2/install/setup.bash
 source demo/bin/activate
 
 # prompt
