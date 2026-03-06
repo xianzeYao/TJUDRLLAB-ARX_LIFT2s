@@ -4,6 +4,7 @@ import sys
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 from arx_ros2_env import ARXRobotEnv  # noqa
 import numpy as np
+from demo_utils import step_base_duration
 from single_arm_pick_place import single_arm_pick_place
 
 OPEN = -3.4
@@ -23,9 +24,9 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
         #     debug=True,
         #     go_home=False,
         # )
-        # arx.step_base(vx=0.0, vy=0.0, vz=-0.5, duration=10.3)
-        # arx.step_base(vx=0.5, vy=0.0, vz=0.0, duration=10.0)
-        # arx.step_base(vx=0.0, vy=0.0, vz=0.5, duration=10.3)
+        # step_base_duration(arx, vx=0.0, vy=0.0, vz=-0.5, duration=10.3)
+        # step_base_duration(arx, vx=0.5, vy=0.0, vz=0.0, duration=10.0)
+        # step_base_duration(arx, vx=0.0, vy=0.0, vz=0.5, duration=10.3)
         arx.step_lift(16.0)
         straw_side = "right" if cup_side == "left" else "left"
         pick_straw_prompt = f"the top of the nearest black straw in the cup"
@@ -43,7 +44,7 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
         )
 
         # 右转90度
-        arx.step_base(vx=0.0, vy=0.0, vz=-0.5, duration=10.0)
+        step_base_duration(arx, vx=0.0, vy=0.0, vz=-0.5, duration=10.0)
         # 杯子放到摄像头中央
         if cup_side == "left":
             suit_action = {cup_side: np.array(
@@ -67,7 +68,7 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
         one_arm_home_action = {straw_side: np.array(
             [0, 0, 0, 0, 0, 0, 0], dtype=np.float32)}
         arx.step(one_arm_home_action)
-        arx.step_base(vx=0.5, vy=0.0, vz=-0.0, duration=2.0)
+        step_base_duration(arx, vx=0.5, vy=0.0, vz=-0.0, duration=2.0)
         # 往前递杯子
         if cup_side == "left":
             give_action = {cup_side: np.array(

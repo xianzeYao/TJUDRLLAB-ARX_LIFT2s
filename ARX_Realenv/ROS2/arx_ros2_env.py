@@ -61,8 +61,7 @@ class ARXRobotEnv():
 
         # 2. Stop the base and lift the base to a safe height
         self.step_lift(0.0)
-
-        self.step_base(0.0, 0.0, 0.0, 0.5)
+        self.step_base(0.0, 0.0, 0.0)
 
         # 3. Get the initial observation
         obs = self.get_observation()
@@ -76,11 +75,11 @@ class ARXRobotEnv():
             raise RuntimeError(f"Failed to lift base: {error}")
         print(f"lift to height {height} done")
 
-    def step_base(self, vx: float, vy: float, vz: float, duration: float):
-        """Move base"""
-        success, error = self._apply_base(vx, vy, vz, duration)
+    def step_base(self, vx: float, vy: float, vz: float):
+        """Publish one base command and return immediately."""
+        success, error = self._apply_base(vx, vy, vz)
         if not success:
-            raise RuntimeError(f"Failed to move base: {error}")
+            raise RuntimeError(f"Failed to send base command: {error}")
 
     def step(self, action: np.ndarray):
         """
@@ -181,7 +180,8 @@ class ARXRobotEnv():
         """
 
         # 1. Stop the base and make both arms go to initial pose and set height to 0
-        self.step_base(0.0, 0.0, 0.0, 1.0)
+        self.step_base(0.0, 0.0, 0.0)
+        time.sleep(1.0)
         success, error_message = self._go_to_initial_pose()
         self.step_lift(0.0)
         if not success:
@@ -215,25 +215,18 @@ class ARXRobotEnv():
             time.sleep(0.03)
         return (True, None)
 
-    def _apply_base(self, vx: float, vy: float, vz: float, duration: float) -> Tuple[bool, str | None]:
-        """Internal: move base chassis with timeout."""
-        start = time.time()
+    def _apply_base(self, vx: float, vy: float, vz: float) -> Tuple[bool, str | None]:
+        """Internal: publish one base chassis command."""
         msg = PosCmd()
-        while time.time() - start < duration:
-            msg.chx = vx
-            msg.chy = vy
-            msg.chz = vz
-            base_status = self.get_robot_status().get("base")
-            msg.height = float(
-                base_status.height) if base_status is not None else 0.0
-            msg.mode1 = 1
-            if not self.node.send_base_msg(msg):
-                return (False, "base command not sent")
-        # stop
-        msg.chx = msg.chy = msg.chz = 0.0
-        msg.mode1 = 2
+        msg.chx = vx
+        msg.chy = vy
+        msg.chz = vz
+        base_status = self.get_robot_status().get("base")
+        msg.height = float(
+            base_status.height) if base_status is not None else 0.0
+        msg.mode1 = 1
         if not self.node.send_base_msg(msg):
-            return (False, "base stop command not sent")
+            return (False, "base command not sent")
         return (True, None)
 
     def _apply_action(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:

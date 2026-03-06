@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import List, Optional, Tuple
 
 import cv2
@@ -116,6 +117,21 @@ def draw_point_label(
         scale=0.55,
         thickness=2,
     )
+
+
+def step_base_duration(
+    arx,
+    vx: float,
+    vy: float,
+    vz: float,
+    duration: float,
+) -> None:
+    if duration <= 0:
+        print("base move duration must be positive")
+        return
+    arx.step_base(vx, vy, vz)
+    time.sleep(duration)
+    arx.step_base(0.0, 0.0, 0.0)
 
 
 def execute_pick_place_cup_sequence(

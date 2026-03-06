@@ -18,6 +18,7 @@ import termios
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
 from arx_ros2_env import ARXRobotEnv
+from demo_utils import step_base_duration
 
 from typing import Literal, Tuple, List
 
@@ -214,15 +215,31 @@ def auto_point_nav(arx: ARXRobotEnv, goal: str):
         if action == "forward":
             if action_content < SWEEP_DISTANCE:
                 continue
-            arx.step_base(vx=0.5, vy=0.0, vz=0.0, duration=(
-                action_content-SWEEP_DISTANCE)/0.06)
+            step_base_duration(
+                arx,
+                vx=0.5,
+                vy=0.0,
+                vz=0.0,
+                duration=(action_content-SWEEP_DISTANCE)/0.06,
+            )
         elif action == "rotate":
             if action_content <= 0:
-                arx.step_base(vx=0.0, vy=0.0, vz=-0.5, duration=float(
-                    (max(-action_content-0.1, 0.0)/(math.pi / 20.6))))
+                step_base_duration(
+                    arx,
+                    vx=0.0,
+                    vy=0.0,
+                    vz=-0.5,
+                    duration=float(
+                        (max(-action_content-0.1, 0.0)/(math.pi / 20.6))),
+                )
             else:
-                arx.step_base(vx=0.0, vy=0.0, vz=0.5, duration=float(
-                    (action_content/(math.pi / 20.6))))
+                step_base_duration(
+                    arx,
+                    vx=0.0,
+                    vy=0.0,
+                    vz=0.5,
+                    duration=float((action_content/(math.pi / 20.6))),
+                )
 
 # ToDO: check if there is need to add
 

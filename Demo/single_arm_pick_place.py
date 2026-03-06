@@ -19,6 +19,32 @@ sys.path.append("../ARX_Realenv/ROS2")  # noqa
 from arx_ros2_env import ARXRobotEnv  # noqa
 
 
+def _release_gripper_at_current_eef(
+    arx: ARXRobotEnv,
+    arm: str,
+    delay_s: float = 5.0,
+) -> None:
+    status = arx.get_robot_status().get(arm)
+    if status is None or not hasattr(status, "end_pos"):
+        print(f"{arm} arm status unavailable, skip delayed gripper open")
+        return
+
+    eef = np.asarray(status.end_pos, dtype=np.float32)
+    if eef.size < 6:
+        print(f"{arm} arm end_pos invalid, skip delayed gripper open")
+        return
+
+    time.sleep(delay_s)
+    open_gripper = -3.4
+    action = {
+        arm: np.array(
+            [eef[0], eef[1], eef[2], eef[3], eef[4], eef[5], open_gripper],
+            dtype=np.float32,
+        )
+    }
+    arx.step(action)
+
+
 def _predict_one_point(color: np.ndarray, base_prompt: str) -> Tuple[int, int]:
     full_prompt = (
         "Provide exactly one point coordinate of objects region this sentence describes: "
@@ -95,6 +121,7 @@ def single_arm_pick_place(
     debug: bool = True,
     go_home: bool = True,
     depth_median_n: int = 10,
+    release_after_pick: bool = False,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     try:
         if reset_robot:
@@ -199,6 +226,11 @@ def single_arm_pick_place(
                 )
             else:
                 raise ValueError(f"unknown item_type: {item_type!r}")
+            if do_pick and release_after_pick:
+                _release_gripper_at_current_eef(
+                    arx=arx,
+                    arm=arm,
+                )
             return pick_ref, place_ref
     finally:
         cv2.destroyAllWindows()

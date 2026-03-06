@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 import sys
 import time
@@ -11,7 +12,7 @@ import numpy as np
 
 from arx_pointing import predict_multi_points_from_rgb
 from single_arm_pick_place import single_arm_pick_place
-
+from demo_utils import step_base_duration
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
 if str(ROS2_DIR) not in sys.path:
@@ -20,19 +21,24 @@ if str(ROS2_DIR) not in sys.path:
 from arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
-FIXED_STEPS_PER_LAYER = 3
-DEFAULT_CENTER_REGION_RATIO = 0.6
-
-
 class UserAbortSearch(Exception):
     pass
+
+
+@dataclass
+class TargetQueryResult:
+    color: np.ndarray
+    bool_result: bool
+    point: Optional[tuple[int, int]]
+    bounds: tuple[int, int, int, int]
+    result: bool
 
 
 def get_color_frame(arx: ARXRobotEnv) -> np.ndarray:
     target_size = (640, 480)
     camera_key = "camera_h_color"
     while True:
-        frames = arx.node.get_camera(
+        frames = arx.get_camera(
             target_size=target_size, return_status=False)
         color = frames.get(camera_key)
         if color is not None:
@@ -104,27 +110,27 @@ def ask_bool(color: np.ndarray, prompt: str) -> bool:
 
 
 def _show_debug_result(
-    color: np.ndarray,
-    result: bool,
-    bool_result: bool,
-    point: Optional[tuple[int, int]],
-    bounds: tuple[int, int, int, int],
+    query: TargetQueryResult,
     center_region_ratio: float,
+    elapsed_move: Optional[float] = None,
+    max_move_duration: Optional[float] = None,
 ) -> int:
-    vis = color.copy()
-    left, top, right, bottom = bounds
-    box_color = (0, 255, 0) if result else (0, 0, 255)
+    vis = query.color.copy()
+    left, top, right, bottom = query.bounds
+    box_color = (0, 255, 0) if query.result else (0, 0, 255)
     cv2.rectangle(vis, (left, top), (right, bottom), box_color, 2)
-    if point is not None:
-        cv2.circle(vis, point, 4, box_color, -1)
+    if query.point is not None:
+        cv2.circle(vis, query.point, 4, box_color, -1)
 
-    point_text = "None" if point is None else f"({point[0]}, {point[1]})"
+    point_text = "None" if query.point is None else f"({query.point[0]}, {query.point[1]})"
     lines = [
-        f"Check: {bool_result}",
-        f"Result: {result}",
+        f"Check: {query.bool_result}",
+        f"Result: {query.result}",
         f"Point: {point_text}",
         f"Center box: {center_region_ratio:.0%}",
     ]
+    if elapsed_move is not None and max_move_duration is not None:
+        lines.append(f"Move time: {elapsed_move:.2f}/{max_move_duration:.2f}s")
     y = 28
     for line in lines:
         cv2.putText(
@@ -133,7 +139,7 @@ def _show_debug_result(
             (10, y),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
-            (0, 255, 0) if result else (0, 0, 255),
+            box_color,
             2,
         )
         y += 24
@@ -144,7 +150,7 @@ def _show_debug_result(
 
 
 def _center_region_bounds(
-    color: np.ndarray, ratio: float = DEFAULT_CENTER_REGION_RATIO
+    color: np.ndarray, ratio: float
 ) -> tuple[int, int, int, int]:
     h, w = color.shape[:2]
     half_w = int(round(w * ratio / 2.0))
@@ -167,36 +173,26 @@ def _point_in_bounds(
     return left <= u <= right and top <= v <= bottom
 
 
-def query_target_with_debug(
+def query_target(
     arx: ARXRobotEnv,
     bool_prompt: str,
     point_prompt: str,
-    debug_scan: bool,
     center_region_ratio: float,
-) -> bool:
-    while True:
-        color = get_color_frame(arx)
-        bool_result = ask_bool(color, bool_prompt)
-        point = None
-        bounds = _center_region_bounds(color, ratio=center_region_ratio)
-        if bool_result:
-            point, _ = ask_point(color, point_prompt)
-        result = bool_result and _point_in_bounds(point, bounds)
-        if not debug_scan:
-            return result
-        key = _show_debug_result(
-            color=color,
-            result=result,
-            bool_result=bool_result,
-            point=point,
-            bounds=bounds,
-            center_region_ratio=center_region_ratio,
-        )
-        if key == ord("r"):
-            continue
-        if key == ord("q"):
-            raise UserAbortSearch("search aborted by user in debug window")
-        return result
+) -> TargetQueryResult:
+    color = get_color_frame(arx)
+    bool_result = ask_bool(color, bool_prompt)
+    point = None
+    bounds = _center_region_bounds(color, ratio=center_region_ratio)
+    if bool_result:
+        point, _ = ask_point(color, point_prompt)
+    result = bool_result and _point_in_bounds(point, bounds)
+    return TargetQueryResult(
+        color=color,
+        bool_result=bool_result,
+        point=point,
+        bounds=bounds,
+        result=result,
+    )
 
 
 def target_bool_prompt(object_desc: str) -> str:
@@ -217,18 +213,26 @@ def target_point_prompt(object_desc: str) -> str:
     )
 
 
-def on_target_found(arx: ARXRobotEnv, object_desc: str) -> bool:
+def _select_arm_from_query(query: TargetQueryResult) -> str:
+    if query.point is None:
+        return "left"
+    width = query.color.shape[1]
+    return "left" if query.point[0] < (width / 2.0) else "right"
+
+
+def on_target_found(arx: ARXRobotEnv, object_desc: str, arm: str) -> bool:
     pick_ref, place_ref = single_arm_pick_place(
         arx=arx,
         pick_prompt=object_desc,
         place_prompt="",
-        arm="left",
+        arm=arm,
         item_type="cup",
         reset_robot=False,
         close_robot=False,
         debug=True,
         go_home=False,
         depth_median_n=10,
+        release_after_pick=True,
     )
     if pick_ref is None and place_ref is None:
         print("pick canceled, continue shelf search")
@@ -238,18 +242,52 @@ def on_target_found(arx: ARXRobotEnv, object_desc: str) -> bool:
 
 def _check_target(
     arx: ARXRobotEnv,
+    object_prompt: str,
     bool_prompt: str,
     point_prompt: str,
     debug_scan: bool,
     center_region_ratio: float,
 ) -> bool:
-    return query_target_with_debug(
+    query = query_target(
         arx=arx,
         bool_prompt=bool_prompt,
         point_prompt=point_prompt,
+        center_region_ratio=center_region_ratio,
+    )
+    if not query.result:
+        return False
+    return _handle_found_target(
+        arx=arx,
+        object_prompt=object_prompt,
+        query=query,
         debug_scan=debug_scan,
         center_region_ratio=center_region_ratio,
     )
+
+
+def _handle_found_target(
+    arx: ARXRobotEnv,
+    object_prompt: str,
+    query: TargetQueryResult,
+    debug_scan: bool,
+    center_region_ratio: float,
+    elapsed_move: Optional[float] = None,
+    max_move_duration: Optional[float] = None,
+) -> bool:
+    arx.step_base(0.0, 0.0, 0.0)
+    if debug_scan:
+        key = _show_debug_result(
+            query=query,
+            center_region_ratio=center_region_ratio,
+            elapsed_move=elapsed_move,
+            max_move_duration=max_move_duration,
+        )
+        if key == ord("r"):
+            return False
+        if key == ord("q"):
+            raise UserAbortSearch("search aborted by user in debug window")
+    arm = _select_arm_from_query(query)
+    return on_target_found(arx, object_prompt, arm=arm)
 
 
 def _scan_direction(
@@ -260,23 +298,43 @@ def _scan_direction(
     obj_point_prompt: str,
     debug_scan: bool,
     center_region_ratio: float,
+    max_move_duration: float,
 ) -> bool:
     vx, vz = 0.0, 0.0
-    move_duration = 1.0
+    moved_duration = 0.0
 
-    for _ in range(FIXED_STEPS_PER_LAYER):
-        arx.step_base(vx=vx, vy=vy, vz=vz, duration=move_duration)
+    while moved_duration < max_move_duration:
+        remaining_duration = max_move_duration - moved_duration
+        phase_start = time.time()
+        arx.step_base(vx=vx, vy=vy, vz=vz)
 
-        if query_target_with_debug(
-            arx=arx,
-            bool_prompt=obj_bool_prompt,
-            point_prompt=obj_point_prompt,
-            debug_scan=debug_scan,
-            center_region_ratio=center_region_ratio,
-        ):
-            print("True")
-            if on_target_found(arx, object_prompt):
-                return True
+        while time.time() - phase_start < remaining_duration:
+            query = query_target(
+                arx=arx,
+                bool_prompt=obj_bool_prompt,
+                point_prompt=obj_point_prompt,
+                center_region_ratio=center_region_ratio,
+            )
+            elapsed = min(time.time() - phase_start, remaining_duration)
+            total_elapsed = moved_duration + elapsed
+            if query.result:
+                print("True")
+                if _handle_found_target(
+                    arx=arx,
+                    object_prompt=object_prompt,
+                    query=query,
+                    debug_scan=debug_scan,
+                    center_region_ratio=center_region_ratio,
+                    elapsed_move=total_elapsed,
+                    max_move_duration=max_move_duration,
+                ):
+                    return True
+                moved_duration = total_elapsed
+                break
+        else:
+            moved_duration = max_move_duration
+
+        arx.step_base(0.0, 0.0, 0.0)
 
     return False
 
@@ -287,7 +345,8 @@ def search_shelf(
     v: float,
     drop_height: float,
     max_layer: int,
-    center_region_ratio: float = DEFAULT_CENTER_REGION_RATIO,
+    center_region_ratio: float = 0.6,
+    max_move_duration: float = 6.0,
     reset_robot: bool = True,
     close_robot: bool = False,
     debug_scan: bool = False,
@@ -298,6 +357,8 @@ def search_shelf(
         raise ValueError("drop_height must be > 0")
     if not 0.0 < center_region_ratio <= 1.0:
         raise ValueError("center_region_ratio must be in (0, 1]")
+    if max_move_duration <= 0:
+        raise ValueError("max_move_duration must be > 0")
     start_height = 20.0
 
     try:
@@ -311,14 +372,13 @@ def search_shelf(
 
         if _check_target(
             arx,
+            object_prompt,
             obj_bool_prompt,
             obj_point_prompt,
             debug_scan=debug_scan,
             center_region_ratio=center_region_ratio,
         ):
-            print("True")
-            if on_target_found(arx, object_prompt):
-                return True
+            return True
 
         while True:
             # Snake scan: odd layer left->right (+v), even layer right->left (-v).
@@ -331,6 +391,7 @@ def search_shelf(
                 obj_point_prompt=obj_point_prompt,
                 debug_scan=debug_scan,
                 center_region_ratio=center_region_ratio,
+                max_move_duration=max_move_duration,
             )
             if layer_hit:
                 return True
@@ -345,14 +406,13 @@ def search_shelf(
 
             if _check_target(
                 arx,
+                object_prompt,
                 obj_bool_prompt,
                 obj_point_prompt,
                 debug_scan=debug_scan,
                 center_region_ratio=center_region_ratio,
             ):
-                print("True")
-                if on_target_found(arx, object_prompt):
-                    return True
+                return True
     except UserAbortSearch:
         print("search aborted by user")
         return False
@@ -376,18 +436,21 @@ def main() -> None:
     )
     search_shelf(
         arx=arx,
-        object_prompt="a red horse",
-        v=1.0,
+        object_prompt="a rubic's cube",
+        v=0.8,
+        max_move_duration=5.0,
         drop_height=10.0,
         max_layer=3,
-        center_region_ratio=0.4,
+        center_region_ratio=0.2,
         reset_robot=True,
-        close_robot=True,
+        close_robot=False,
         debug_scan=True,
     )
+    # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
+    # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)
+    # step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
+    arx.close()
 
 
 if __name__ == "__main__":
     main()
-
-# TODO 扫到有就停着左右动

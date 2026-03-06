@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 from arx5_arm_msg.msg._robot_cmd import RobotCmd
 from motion_swap import build_swap_sequence  # 控制命令
+from demo_utils import step_base_duration
 from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_base_point, pixel_to_ref_point_safe
 from arx_pointing import predict_point_from_rgb
 from arm_control.msg._pos_cmd import PosCmd
@@ -53,9 +54,9 @@ def main():
                        }
         arx.step(lift_action)
         time.sleep(1.0)
-        # arx.step_base(vx=-0.5, vy=0.0, vz=0.5, duration=9.0)
-        # arx.step_base(vx=0.75, vy=0.0, vz=0.0, duration=2.0)
-        # arx.step_base(vx=-0.5, vy=0.0, vz=0.0, duration=5.0)
+        # step_base_duration(arx, vx=-0.5, vy=0.0, vz=0.5, duration=9.0)
+        # step_base_duration(arx, vx=0.75, vy=0.0, vz=0.0, duration=2.0)
+        # step_base_duration(arx, vx=-0.5, vy=0.0, vz=0.0, duration=5.0)
         # 简单detect白色纸团
         K = load_intrinsics()
         T_left = load_cam2ref(side="left")
@@ -81,7 +82,7 @@ def main():
             if key == ord("q"):
                 return
             if key == ord("w"):
-                arx.step_base(vx=0.5, vy=0.0, vz=0.0, duration=1.0)
+                step_base_duration(arx, vx=0.5, vy=0.0, vz=0.0, duration=1.0)
                 continue
             if key == ord("e"):
                 break
