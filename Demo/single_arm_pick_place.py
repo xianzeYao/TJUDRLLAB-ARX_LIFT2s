@@ -97,16 +97,11 @@ def single_arm_pick_place(
     place_prompt: str,
     arm: str = "left",
     item_type: Literal["cup", "straw"] = "cup",
-    reset_robot: bool = True,
-    close_robot: bool = True,
     debug: bool = True,
     depth_median_n: int = 10,
     release_after_pick: bool = False,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     try:
-        if reset_robot:
-            arx.reset()
-
         while True:
             do_pick = bool(pick_prompt)
             do_place = bool(place_prompt)
@@ -208,8 +203,6 @@ def single_arm_pick_place(
             return pick_ref, place_ref
     finally:
         cv2.destroyAllWindows()
-        if close_robot:
-            arx.close()
 
 
 def main():
@@ -235,8 +228,11 @@ def main():
     # single_arm_pick_place(arx, reset_robot=False, pick_prompt="", place_prompt=place_prompt, arm="right",
     #                       debug=True, depth_median_n=10)
     pick_prompt = "the cup on the left brown coaster"
-    single_arm_pick_place(arx, reset_robot=False, pick_prompt=pick_prompt, place_prompt="",
-                          debug=True, depth_median_n=15)
+    try:
+        single_arm_pick_place(arx, pick_prompt=pick_prompt, place_prompt="",
+                              debug=True, depth_median_n=15)
+    finally:
+        arx.close()
 
 
 if __name__ == "__main__":

@@ -31,8 +31,14 @@ COASTER_PROMPTS = [
 ]
 
 
-def _arm_for_step(step_idx: int) -> str:
-    return "left" if step_idx % 2 == 0 else "right"
+def _arm_for_step(step_idx: int, first_side: Literal["left", "right"]) -> str:
+    if first_side not in ("left", "right"):
+        raise ValueError(
+            f"first_side must be 'left' or 'right', got {first_side!r}"
+        )
+    if first_side == "left":
+        return "left" if step_idx % 2 == 0 else "right"
+    return "right" if step_idx % 2 == 0 else "left"
 
 
 def _build_multi_prompt(
@@ -117,8 +123,7 @@ def _save_points_vis(vis_img: np.ndarray, save_path: str) -> None:
 def dual_arm_pick_planning_parallel(
     arx: ARXRobotEnv,
     goal: str = "red cup",
-    reset_robot: bool = True,
-    close_robot: bool = True,
+    first_side: Literal["left", "right"] = "left",
     debug_raw: bool = True,
     depth_median_n: int = 10,
     no_last_place: bool = False,
@@ -126,8 +131,6 @@ def dual_arm_pick_planning_parallel(
     dir: Optional[str] = None,
 ):
     try:
-        if reset_robot:
-            arx.reset()
         arx.step_lift(17.0)
         time.sleep(1.0)
 
@@ -330,7 +333,7 @@ def dual_arm_pick_planning_parallel(
             pick_refs: List[np.ndarray] = []
             place_refs: List[Optional[np.ndarray]] = []
             for i, p in enumerate(pick_px):
-                arm = _arm_for_step(i)
+                arm = _arm_for_step(i, first_side=first_side)
                 pick_ref = pixel_to_ref_point_safe(
                     p,
                     depth,
@@ -347,7 +350,7 @@ def dual_arm_pick_planning_parallel(
                 if p is None:
                     place_refs.append(None)
                     continue
-                arm = _arm_for_step(i)
+                arm = _arm_for_step(i, first_side=first_side)
                 place_ref = pixel_to_ref_point_safe(
                     p,
                     depth,
@@ -367,7 +370,7 @@ def dual_arm_pick_planning_parallel(
                 continue
 
             # 先执行第 0 步的 pick（单臂）
-            first_arm = _arm_for_step(0)
+            first_arm = _arm_for_step(0, first_side=first_side)
             first_pick = build_pick_cup_sequence(
                 pick_refs[0], arm=first_arm)
             if first_arm == "left":
@@ -380,8 +383,8 @@ def dual_arm_pick_planning_parallel(
             last_place_idx = steps_n - 2 if no_last_place else steps_n - 1
             home_place_idx = last_place_idx if no_last_place else last_place_idx - 1
             for i in range(steps_n - 1):
-                cur_arm = _arm_for_step(i)
-                next_arm = _arm_for_step(i + 1)
+                cur_arm = _arm_for_step(i, first_side=first_side)
+                next_arm = _arm_for_step(i + 1, first_side=first_side)
                 cur_place = (
                     build_place_cup_sequence(place_refs[i], arm=cur_arm)
                     if place_refs[i] is not None
@@ -404,7 +407,7 @@ def dual_arm_pick_planning_parallel(
 
             # 最后一步是否放置
             if not no_last_place:
-                last_arm = _arm_for_step(steps_n - 1)
+                last_arm = _arm_for_step(steps_n - 1, first_side=first_side)
                 last_place = build_place_cup_sequence(
                     place_refs[steps_n - 1], arm=last_arm
                 )
@@ -420,8 +423,6 @@ def dual_arm_pick_planning_parallel(
 
     finally:
         cv2.destroyAllWindows()
-        if close_robot:
-            arx.close()
 
 
 def main():
@@ -438,16 +439,18 @@ def main():
         # dir="../Video4demo",
         # video_name="dual_cup_pick_planning_parallel_red",
     )
-    dual_arm_pick_planning_parallel(
-        arx,
-        close_robot=False,
-        goal="red cup",
-        no_last_place=True,
-        single_test=True,
-        # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
-        depth_median_n=15,
-    )
-    time.sleep(10.0)
-    arx.close()
+    try:
+        arx.reset()
+        dual_arm_pick_planning_parallel(
+            arx,
+            goal="red cup",
+            no_last_place=True,
+            single_test=True,
+            # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
+            depth_median_n=15,
+        )
+        time.sleep(10.0)
+    finally:
+        arx.close()
 if __name__ == "__main__":
     main()

@@ -233,8 +233,6 @@ def on_target_found(
         place_prompt="",
         arm=arm,
         item_type="cup",
-        reset_robot=False,
-        close_robot=False,
         debug=debug_pick_place,
         depth_median_n=depth_median_n,
         release_after_pick=True,
@@ -368,8 +366,6 @@ def search_shelf(
     max_layer: int,
     center_region_ratio: float = 0.6,
     max_move_duration: float = 6.0,
-    reset_robot: bool = True,
-    close_robot: bool = False,
     debug_raw: bool = False,
     debug_pick_place: bool = False,
     depth_median_n: int = 10,
@@ -385,8 +381,6 @@ def search_shelf(
     start_height = 20.0
 
     try:
-        if reset_robot:
-            arx.reset()
         arx.step_lift(start_height)
         current_height = start_height
         layer_index = 1
@@ -447,8 +441,6 @@ def search_shelf(
         return False
     finally:
         cv2.destroyAllWindows()
-        if close_robot:
-            arx.close()
 
 
 def main() -> None:
@@ -463,24 +455,25 @@ def main() -> None:
         camera_view=("camera_h",),
         img_size=(640, 480),
     )
-    search_shelf(
-        arx=arx,
-        object_prompt="a rubic's cube",
-        v=0.8,
-        max_move_duration=5.0,
-        drop_height=10.0,
-        max_layer=3,
-        center_region_ratio=0.25,
-        reset_robot=True,
-        close_robot=False,
-        debug_raw=False,
-        debug_pick_place=False,
-        depth_median_n=10,
-    )
-    # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
-    # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)
-    # step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
-    arx.close()
+    try:
+        arx.reset()
+        search_shelf(
+            arx=arx,
+            object_prompt="a rubic's cube",
+            v=0.8,
+            max_move_duration=5.0,
+            drop_height=10.0,
+            max_layer=3,
+            center_region_ratio=0.25,
+            debug_raw=False,
+            debug_pick_place=True,
+            depth_median_n=10,
+        )
+        # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
+        # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)
+        # step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
+    finally:
+        arx.close()
 
 
 if __name__ == "__main__":

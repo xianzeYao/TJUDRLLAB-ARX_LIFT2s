@@ -10,18 +10,44 @@ from single_arm_pick_place import single_arm_pick_place
 OPEN = -3.4
 CLOSE = -2.2
 
+def special_give(arx: ARXRobotEnv, cup_side: str):
+    straw_side = "right" if cup_side == "left" else "left"
+    # 拿吸管的手回到初始位姿
+    one_arm_home_action = {straw_side: np.array(
+        [0, 0, 0, 0, 0, 0, 0], dtype=np.float32)}
+    arx.step(one_arm_home_action)
+    step_base_duration(arx, vx=0.5, vy=0.0, vz=-0.0, duration=2.0)
+    # 往前递杯子
+    if cup_side == "left":
+        give_action = {cup_side: np.array(
+            [0.4, 0, 0.25, 0, 0, 0, CLOSE], dtype=np.float32)}
+    else:
+        give_action = {cup_side: np.array(
+            [0.4, 0, 0.25, 0, 0, 0, CLOSE], dtype=np.float32)}
+    arx.step(give_action)
+    if cup_side == "left":
+        give2_action = {cup_side: np.array(
+            [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
+    else:
+        give2_action = {cup_side: np.array(
+            [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
+    arx.step(give2_action)
+    time.sleep(3.0)
+    if cup_side == "left":
+        open_action = {cup_side: np.array(
+            [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
+    else:
+        open_action = {cup_side: np.array(
+            [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
+    arx.step(open_action)
 
 def dual_cup_straw(
     arx: ARXRobotEnv,
     cup_side: str = "left",
-    reset_robot: bool = True,
-    close_robot: bool = True,
     debug_pick_place: bool = True,
     depth_median_n: int = 10,
 ):
     try:
-        if reset_robot:
-            arx.reset()
         # arx.step_lift(14.0)
         # single_arm_pick_place(
         #     arx,
@@ -45,8 +71,6 @@ def dual_cup_straw(
             place_prompt="",
             arm=straw_side,
             item_type="straw",
-            reset_robot=False,
-            close_robot=False,
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
@@ -67,44 +91,12 @@ def dual_cup_straw(
             place_prompt=place_straw_prompt,
             arm=straw_side,
             item_type="straw",
-            reset_robot=False,
-            close_robot=False,
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
-        # 拿吸管的手回到初始位姿
-        one_arm_home_action = {straw_side: np.array(
-            [0, 0, 0, 0, 0, 0, 0], dtype=np.float32)}
-        arx.step(one_arm_home_action)
-        step_base_duration(arx, vx=0.5, vy=0.0, vz=-0.0, duration=2.0)
-        # 往前递杯子
-        if cup_side == "left":
-            give_action = {cup_side: np.array(
-                [0.4, 0, 0.25, 0, 0, 0, CLOSE], dtype=np.float32)}
-        else:
-            give_action = {cup_side: np.array(
-                [0.4, 0, 0.25, 0, 0, 0, CLOSE], dtype=np.float32)}
-        arx.step(give_action)
-        if cup_side == "left":
-            give2_action = {cup_side: np.array(
-                [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
-        else:
-            give2_action = {cup_side: np.array(
-                [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
-        arx.step(give2_action)
-        time.sleep(3.0)
-        if cup_side == "left":
-            open_action = {cup_side: np.array(
-                [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
-        else:
-            open_action = {cup_side: np.array(
-                [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
-        arx.step(open_action)
+        
     except Exception as e:
         print(f"An error occurred: {e}")
-    finally:
-        if close_robot:
-            arx.close()
 
 
 def main():
@@ -115,9 +107,12 @@ def main():
                       camera_type="all",
                       camera_view=("camera_h",),
                       img_size=(640, 480))
-    arx.reset()
-    dual_cup_straw(arx, cup_side="left", close_robot=True)
-
+    try:
+        arx.reset()
+        dual_cup_straw(arx, cup_side="left", debug_pick_place=True, depth_median_n=10)
+        special_give(arx, cup_side="left")
+    finally:
+        arx.close()
 
 if __name__ == "__main__":
     main()

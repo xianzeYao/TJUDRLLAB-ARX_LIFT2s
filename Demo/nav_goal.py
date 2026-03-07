@@ -146,10 +146,12 @@ def _execute_nav_actions(
         if action == "rotate":
             if value <= 0:
                 duration = max(-value - 0.1, 0.0) / BASE_ROTATE_SPEED
-                step_base_duration(arx, vx=0.0, vy=0.0, vz=-0.5, duration=float(duration))
+                step_base_duration(arx, vx=0.0, vy=0.0, vz=-
+                                   0.5, duration=float(duration))
             else:
                 duration = value / BASE_ROTATE_SPEED
-                step_base_duration(arx, vx=0.0, vy=0.0, vz=0.5, duration=float(duration))
+                step_base_duration(arx, vx=0.0, vy=0.0,
+                                   vz=0.5, duration=float(duration))
         elif action == "forward":
             remaining = value - distance
             if remaining <= 0:
@@ -167,8 +169,6 @@ def nav_to_goal(
     arx: ARXRobotEnv,
     goal: str = "white paper balls",
     distance: float = 0.55,
-    reset_robot: bool = True,
-    close_robot: bool = True,
     continuous: bool = False,
     debug_raw: bool = False,
     depth_median_n: int = 5,
@@ -178,17 +178,15 @@ def nav_to_goal(
     last_result = None
 
     try:
-        if reset_robot:
-            arx.reset()
-        arx.step_lift(20.0)
-
+        arx.step_lift(12.0)
         while True:
             key = _get_key_nonblock()
             if key == "q":
                 print("Stop signal received.")
                 return last_result
 
-            frames = arx.get_camera(target_size=(640, 480), return_status=False)
+            frames = arx.get_camera(target_size=(
+                640, 480), return_status=False)
             color = frames.get("camera_h_color")
             if color is None:
                 if continuous:
@@ -196,7 +194,8 @@ def nav_to_goal(
                     continue
                 raise RuntimeError("failed to read camera_h color frame")
 
-            detect_goal = _vote_goal_presence(color, goal=goal, vote_times=vote_times)
+            detect_goal = _vote_goal_presence(
+                color, goal=goal, vote_times=vote_times)
             if not detect_goal:
                 print(f"No goal detected for: {goal}")
                 if continuous:
@@ -204,7 +203,8 @@ def nav_to_goal(
                     continue
                 return None
 
-            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+            color, depth = get_aligned_frames(
+                arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
                 if continuous:
                     time.sleep(0.2)
@@ -256,8 +256,6 @@ def nav_to_goal(
     finally:
         cv2.destroyAllWindows()
         _restore_keyboard(old_settings)
-        if close_robot:
-            arx.close()
 
 
 def main():
@@ -272,17 +270,19 @@ def main():
         camera_view=("camera_h",),
         img_size=(640, 480),
     )
-    nav_to_goal(
-        arx,
-        goal="a white crumpled paper",
-        distance=0.55,
-        reset_robot=False,
-        close_robot=True,
-        continuous=False,
-        debug_raw=False,
-        depth_median_n=1,
-        vote_times=5,
-    )
+    try:
+        arx.reset()
+        nav_to_goal(
+            arx,
+            goal="a white crumpled paper",
+            distance=0.55,
+            continuous=False,
+            debug_raw=False,
+            depth_median_n=5,
+            vote_times=5,
+        )
+    finally:
+        arx.close()
 
 
 if __name__ == "__main__":

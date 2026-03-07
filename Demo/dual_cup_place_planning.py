@@ -167,8 +167,6 @@ def predict_place_from_queue(
 
 def dual_cup_place_planning(
     arx: ARXRobotEnv,
-    reset_robot: bool = True,
-    close_robot: bool = True,
     debug_raw: bool = True,
     depth_median_n: int = 10,
     manual: bool = False,
@@ -176,8 +174,6 @@ def dual_cup_place_planning(
     if manual and not debug_raw:
         raise ValueError("manual=True requires debug_raw=True")
     total_cycles = 6
-    if reset_robot:
-        arx.reset()
     arx.step_lift(13.5)
 
     picked_queue = deque()
@@ -593,7 +589,11 @@ def main():
         camera_view=("camera_h",),
         img_size=(640, 480),
     )
-    dual_cup_place_planning(arx, manual=True, depth_median_n=15)
+    try:
+        arx.reset()
+        dual_cup_place_planning(arx, manual=True, depth_median_n=15)
+    finally:
+        arx.close()
 
 
 if __name__ == "__main__":
