@@ -10,6 +10,7 @@ from single_arm_pick_place import single_arm_pick_place
 OPEN = -3.4
 CLOSE = -2.2
 
+
 def special_give(arx: ARXRobotEnv, cup_side: str):
     straw_side = "right" if cup_side == "left" else "left"
     # 拿吸管的手回到初始位姿
@@ -41,6 +42,7 @@ def special_give(arx: ARXRobotEnv, cup_side: str):
             [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
     arx.step(open_action)
 
+
 def dual_cup_straw(
     arx: ARXRobotEnv,
     cup_side: str = "left",
@@ -69,7 +71,7 @@ def dual_cup_straw(
             arx,
             pick_prompt=pick_straw_prompt,
             place_prompt="",
-            arm=straw_side,
+            arm_side=straw_side,
             item_type="straw",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
@@ -89,12 +91,12 @@ def dual_cup_straw(
             arx,
             pick_prompt="",
             place_prompt=place_straw_prompt,
-            arm=straw_side,
+            arm_side=straw_side,
             item_type="straw",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
-        
+
     except Exception as e:
         print(f"An error occurred: {e}")
 
@@ -109,10 +111,12 @@ def main():
                       img_size=(640, 480))
     try:
         arx.reset()
-        dual_cup_straw(arx, cup_side="left", debug_pick_place=True, depth_median_n=10)
+        dual_cup_straw(arx, cup_side="left",
+                       debug_pick_place=True, depth_median_n=10)
         special_give(arx, cup_side="left")
     finally:
         arx.close()
+
 
 if __name__ == "__main__":
     main()

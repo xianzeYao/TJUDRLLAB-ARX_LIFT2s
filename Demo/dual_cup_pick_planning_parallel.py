@@ -216,7 +216,8 @@ def dual_arm_pick_planning_parallel(
         while planned and plan_steps:
             arx.step_lift(13.0)
             time.sleep(1.0)
-            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+            color, depth = get_aligned_frames(
+                arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
                 continue
 
@@ -452,5 +453,7 @@ def main():
         time.sleep(10.0)
     finally:
         arx.close()
+
+
 if __name__ == "__main__":
     main()

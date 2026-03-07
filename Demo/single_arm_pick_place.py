@@ -91,11 +91,18 @@ def _predict_two_points(
     return pick, place
 
 
+def _select_arm_from_pixel(
+    pixel: Tuple[int, int],
+    image_width: int,
+) -> Literal["left", "right"]:
+    return "left" if pixel[0] < (image_width / 2.0) else "right"
+
+
 def single_arm_pick_place(
     arx: ARXRobotEnv,
     pick_prompt: str,
     place_prompt: str,
-    arm: str = "left",
+    arm_side: Literal["left", "right", "fit"] = "left",
     item_type: Literal["cup", "straw"] = "cup",
     debug: bool = True,
     depth_median_n: int = 10,
@@ -108,7 +115,8 @@ def single_arm_pick_place(
             if not do_pick and not do_place:
                 raise ValueError("pick_prompt 和 place_prompt 不能同时为空")
             time.sleep(1.5)
-            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+            color, depth = get_aligned_frames(
+                arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
                 continue
             pick_px = None
@@ -121,6 +129,15 @@ def single_arm_pick_place(
                 pick_px = _predict_one_point(color, pick_prompt)
             else:
                 place_px = _predict_one_point(color, place_prompt)
+
+            if arm_side == "fit":
+                ref_pixel = pick_px if pick_px is not None else place_px
+                if ref_pixel is None:
+                    raise RuntimeError(
+                        "fit arm_side requires at least one predicted point")
+                arm = _select_arm_from_pixel(ref_pixel, color.shape[1])
+            else:
+                arm = arm_side
 
             pick_ref = None
             place_ref = None
@@ -144,7 +161,7 @@ def single_arm_pick_place(
                     continue
 
             vis = color.copy()
-            lines = []
+            lines = [f"Arm: {arm}"]
             if pick_px is not None:
                 cv2.circle(vis, pick_px, 3,  (0, 0, 255), -1)
                 lines.append(f"Pick: {pick_prompt}")
@@ -225,7 +242,7 @@ def main():
     #     [0, 0, 0, 0, 0, 0, -2.05], dtype=np.float32)}
     # arx.step(right_close_action)
     # place_prompt = "the center part of the brown coaster on the right side"
-    # single_arm_pick_place(arx, reset_robot=False, pick_prompt="", place_prompt=place_prompt, arm="right",
+    # single_arm_pick_place(arx, pick_prompt="", place_prompt=place_prompt, arm_side="right",
     #                       debug=True, depth_median_n=10)
     pick_prompt = "the cup on the left brown coaster"
     try:

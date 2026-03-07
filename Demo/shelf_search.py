@@ -213,17 +213,9 @@ def target_point_prompt(object_desc: str) -> str:
     )
 
 
-def _select_arm_from_query(query: TargetQueryResult) -> str:
-    if query.point is None:
-        return "left"
-    width = query.color.shape[1]
-    return "left" if query.point[0] < (width / 2.0) else "right"
-
-
 def on_target_found(
     arx: ARXRobotEnv,
     object_desc: str,
-    arm: str,
     debug_pick_place: bool,
     depth_median_n: int,
 ) -> bool:
@@ -231,7 +223,7 @@ def on_target_found(
         arx=arx,
         pick_prompt=object_desc,
         place_prompt="",
-        arm=arm,
+        arm_side="fit",
         item_type="cup",
         debug=debug_pick_place,
         depth_median_n=depth_median_n,
@@ -295,11 +287,9 @@ def _handle_found_target(
             return False
         if key == ord("q"):
             raise UserAbortSearch("search aborted by user in debug window")
-    arm = _select_arm_from_query(query)
     return on_target_found(
         arx,
         object_prompt,
-        arm=arm,
         debug_pick_place=debug_pick_place,
         depth_median_n=depth_median_n,
     )
@@ -459,13 +449,13 @@ def main() -> None:
         arx.reset()
         search_shelf(
             arx=arx,
-            object_prompt="a rubic's cube",
+            object_prompt="a yellow glue",
             v=0.8,
             max_move_duration=5.0,
             drop_height=10.0,
             max_layer=3,
             center_region_ratio=0.25,
-            debug_raw=False,
+            debug_raw=True,
             debug_pick_place=True,
             depth_median_n=10,
         )

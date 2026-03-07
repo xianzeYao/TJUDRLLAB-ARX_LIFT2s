@@ -131,7 +131,8 @@ def pixel_to_ref_point(
     if robot_part == "left":
         T_cam2ref = T_left if T_left is not None else load_cam2ref(side="left")
     elif robot_part == "right":
-        T_cam2ref = T_right if T_right is not None else load_cam2ref(side="right")
+        T_cam2ref = T_right if T_right is not None else load_cam2ref(
+            side="right")
     else:
         raise ValueError(f"robot_part must be left/right, got {robot_part!r}")
     ref_point = T_cam2ref @ cam_point
@@ -174,7 +175,8 @@ def pixel_to_base_point(
     cam_point = _pixel_to_camera_point(pixel, depth_image, K)
 
     if robot_part == "right":
-        T_cam2ref = T_right if T_right is not None else load_cam2ref(side="right")
+        T_cam2ref = T_right if T_right is not None else load_cam2ref(
+            side="right")
         ref_point = T_cam2ref @ cam_point
     else:
         T_cam2ref = T_left if T_left is not None else load_cam2ref(side="left")
@@ -182,7 +184,8 @@ def pixel_to_base_point(
         if robot_part == "center":
             ref_point = ref_point + BIAS_REF2CAM
         elif robot_part != "left":
-            raise ValueError(f"robot_part must be center/left/right, got {robot_part!r}")
+            raise ValueError(
+                f"robot_part must be center/left/right, got {robot_part!r}")
 
     return ref_point[:3]
 
