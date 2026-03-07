@@ -8,7 +8,7 @@ import cv2
 from arx5_arm_msg.msg._robot_cmd import RobotCmd
 from motion_swap import build_swap_sequence  # 控制命令
 from demo_utils import step_base_duration
-from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_base_point, pixel_to_ref_point_safe
+from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_base_point
 from arx_pointing import predict_point_from_rgb
 from arm_control.msg._pos_cmd import PosCmd
 
@@ -69,7 +69,13 @@ def main():
             if not np.isfinite(raw_depth) or raw_depth <= 0:
                 print(f"预测像素 {(u, v)} 深度无效({raw_depth})，按 r 刷新")
                 continue
-            trash_base_point = pixel_to_base_point((u, v), depth, K, T_left)
+            trash_base_point = pixel_to_base_point(
+                (u, v),
+                depth,
+                robot_part="center",
+                K=K,
+                T_left=T_left,
+            )
             print(f"trash_base_point: {trash_base_point}")
             vis = color.copy()
             cv2.circle(vis, (u, v), 3, (0, 0, 255), -1)

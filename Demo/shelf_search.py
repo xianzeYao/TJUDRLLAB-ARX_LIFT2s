@@ -229,7 +229,7 @@ def on_target_found(arx: ARXRobotEnv, object_desc: str, arm: str) -> bool:
         item_type="cup",
         reset_robot=False,
         close_robot=False,
-        debug=True,
+        debug=False,
         go_home=False,
         depth_median_n=10,
         release_after_pick=True,
@@ -441,10 +441,10 @@ def main() -> None:
         max_move_duration=5.0,
         drop_height=10.0,
         max_layer=3,
-        center_region_ratio=0.2,
+        center_region_ratio=0.25,
         reset_robot=True,
         close_robot=False,
-        debug_scan=True,
+        debug_scan=False,
     )
     # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
     # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)

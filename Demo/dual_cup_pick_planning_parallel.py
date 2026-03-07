@@ -439,21 +439,21 @@ def main():
         camera_type="all",
         camera_view=("camera_h",),
         img_size=(640, 480),
-        video=True,
-        video_fps=30.0,
-        dir="../Video4demo",
-        video_name="dual_cup_pick_planning_parallel_red",
+        # video=True,
+        # video_fps=30.0,
+        # dir="../Video4demo",
+        # video_name="dual_cup_pick_planning_parallel_red",
     )
     dual_arm_pick_planning_parallel(
         arx,
-        close_robot=True,
+        close_robot=False,
         goal="red cup",
         no_last_place=True,
         single_test=True,
-        dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
+        # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
         depth_median_n=15,
     )
-
-
+    time.sleep(10.0)
+    arx.close()
 if __name__ == "__main__":
     main()

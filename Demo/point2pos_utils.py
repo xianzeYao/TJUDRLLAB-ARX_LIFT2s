@@ -113,6 +113,64 @@ def pixel_to_ref_point_safe(
         return None
 
 
+def pixel_to_base_point(
+    pixel: Tuple[int, int],
+    depth_image: np.ndarray,
+    robot_part: Literal["center", "left", "right"] = "center",
+    K: np.ndarray | None = None,
+    T_left: np.ndarray | None = None,
+    T_right: np.ndarray | None = None,
+) -> np.ndarray:
+    """像素 + 深度 -> 机器人工作坐标系 3D 点。"""
+    u, v = int(round(pixel[0])), int(round(pixel[1]))
+    H, W = depth_image.shape
+    if not (0 <= u < W and 0 <= v < H):
+        raise ValueError(f"像素越界: {(u, v)} not in [0,{W})x[0,{H})")
+
+    z = depth_to_meters(float(depth_image[v, u]))
+    if K is None:
+        K = load_intrinsics()
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+    x_cam = (u - cx) * z / fx
+    y_cam = (v - cy) * z / fy
+    cam_point = np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
+
+    if robot_part == "right":
+        T_cam2ref = T_right if T_right is not None else load_cam2ref(side="right")
+        ref_point = T_cam2ref @ cam_point
+    else:
+        T_cam2ref = T_left if T_left is not None else load_cam2ref(side="left")
+        ref_point = T_cam2ref @ cam_point
+        if robot_part == "center":
+            ref_point = ref_point + BIAS_REF2CAM
+        elif robot_part != "left":
+            raise ValueError(f"robot_part must be center/left/right, got {robot_part!r}")
+
+    return ref_point[:3]
+
+
+def pixel_to_base_point_safe(
+    pixel: Tuple[int, int],
+    depth_image: np.ndarray,
+    robot_part: Literal["center", "left", "right"] = "center",
+    K: np.ndarray | None = None,
+    T_left: np.ndarray | None = None,
+    T_right: np.ndarray | None = None,
+) -> np.ndarray | None:
+    """像素 + 深度 -> base 3D 点。深度无效则返回 None。"""
+    try:
+        return pixel_to_base_point(
+            pixel,
+            depth_image,
+            robot_part=robot_part,
+            K=K,
+            T_left=T_left,
+            T_right=T_right,
+        )
+    except ValueError:
+        return None
+
+
 def filter_valid_points(
     uv_list: List[Tuple[int, int]],
     depth: np.ndarray,
@@ -135,32 +193,13 @@ def filter_valid_points(
     return valid_uvs, pt_refs
 
 
-def pixel_to_base_point(
-    pixel: Tuple[int, int],
-    depth_image: np.ndarray,
-    K: np.ndarray,
-    T_cam2ref: np.ndarray,
-) -> np.ndarray:
-    """像素 + 深度 -> 基坐标系 3D 点。"""
-    u, v = pixel
-    H, W = depth_image.shape
-    if not (0 <= u < W and 0 <= v < H):
-        raise ValueError(f"像素越界: {(u, v)} not in [0,{W})x[0,{H})")
-    z = depth_to_meters(float(depth_image[v, u]))
-    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
-    x_cam = (u - cx) * z / fx
-    y_cam = (v - cy) * z / fy
-    cam_point = np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
-    base_point = T_cam2ref @ cam_point + BIAS_REF2CAM
-    return base_point[:2]
-
-
 __all__ = [
     "load_intrinsics",
     "load_cam2ref",
     "depth_to_meters",
     "pixel_to_ref_point",
     "pixel_to_ref_point_safe",
-    "filter_valid_points",
     "pixel_to_base_point",
+    "pixel_to_base_point_safe",
+    "filter_valid_points",
 ]
