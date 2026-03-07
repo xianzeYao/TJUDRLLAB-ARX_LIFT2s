@@ -15,7 +15,7 @@ from arx_pointing import predict_multi_points_from_rgb
 from arx_ros2_env import ARXRobotEnv
 from demo_utils import step_base_duration
 from nav_utils import path_to_actions
-from point2pos_utils import pixel_to_base_point
+from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
 
 BASE_FORWARD_SPEED = 0.06
 BASE_ROTATE_SPEED = math.pi / 20.6
@@ -82,10 +82,10 @@ def _vote_goal_presence(
 def _select_goal_point(points, depth):
     valid_goals = []
     for point in points:
-        try:
-            goal_pw = pixel_to_base_point(point, depth, robot_part="center")
-        except ValueError as exc:
-            print(f"skip point {point}: {exc}")
+        goal_pw = pixel_to_base_point_safe(point, depth, robot_part="center")
+        if goal_pw is None:
+            u, v = int(round(point[0])), int(round(point[1]))
+            print(f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新")
             continue
         valid_goals.append((point, goal_pw))
 
@@ -167,14 +167,21 @@ def nav_to_goal(
     arx: ARXRobotEnv,
     goal: str = "white paper balls",
     distance: float = 0.55,
+    reset_robot: bool = True,
+    close_robot: bool = True,
     continuous: bool = False,
-    debug: bool = False,
+    debug_raw: bool = False,
+    depth_median_n: int = 5,
     vote_times: int = 5,
 ):
     old_settings = _init_keyboard()
     last_result = None
 
     try:
+        if reset_robot:
+            arx.reset()
+        arx.step_lift(20.0)
+
         while True:
             key = _get_key_nonblock()
             if key == "q":
@@ -183,12 +190,11 @@ def nav_to_goal(
 
             frames = arx.get_camera(target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
-            depth = frames.get("camera_h_aligned_depth_to_color")
-            if color is None or depth is None:
+            if color is None:
                 if continuous:
                     time.sleep(0.2)
                     continue
-                raise RuntimeError("failed to read camera_h color/depth frame")
+                raise RuntimeError("failed to read camera_h color frame")
 
             detect_goal = _vote_goal_presence(color, goal=goal, vote_times=vote_times)
             if not detect_goal:
@@ -197,6 +203,13 @@ def nav_to_goal(
                     time.sleep(0.2)
                     continue
                 return None
+
+            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+            if color is None or depth is None:
+                if continuous:
+                    time.sleep(0.2)
+                    continue
+                raise RuntimeError("failed to read camera_h color/depth frame")
 
             points, _ = predict_multi_points_from_rgb(
                 color,
@@ -227,7 +240,7 @@ def nav_to_goal(
             path = [(0.0, 0.0), (float(goal_pw[0]), float(-goal_pw[1]))]
             actions = path_to_actions(path)
 
-            if debug:
+            if debug_raw:
                 debug_result = _confirm_debug_view(color, points, goal_pixel)
                 if debug_result is None:
                     print("Stop signal received.")
@@ -241,7 +254,10 @@ def nav_to_goal(
             if not continuous:
                 return last_result
     finally:
+        cv2.destroyAllWindows()
         _restore_keyboard(old_settings)
+        if close_robot:
+            arx.close()
 
 
 def main():
@@ -256,19 +272,17 @@ def main():
         camera_view=("camera_h",),
         img_size=(640, 480),
     )
-    try:
-        arx.step_lift(20.0)
-        nav_to_goal(
-            arx,
-            goal="a white crumpled paper",
-            distance=0.55,
-            continuous=False,
-            debug=False,
-            vote_times=5,
-        )
-    finally:
-        cv2.destroyAllWindows()
-        arx.close()
+    nav_to_goal(
+        arx,
+        goal="a white crumpled paper",
+        distance=0.55,
+        reset_robot=False,
+        close_robot=True,
+        continuous=False,
+        debug_raw=False,
+        depth_median_n=1,
+        vote_times=5,
+    )
 
 
 if __name__ == "__main__":

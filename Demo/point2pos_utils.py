@@ -80,22 +80,60 @@ def load_cam2ref(
     )
 
 
-def pixel_to_ref_point(
+def get_aligned_frames(
+    arx,
+    depth_median_n: int = 1,
+) -> Tuple[np.ndarray | None, np.ndarray | None]:
+    frames = arx.get_camera(target_size=(640, 480), return_status=False)
+    color = frames.get("camera_h_color")
+    depth = frames.get("camera_h_aligned_depth_to_color")
+    if color is None or depth is None or depth_median_n <= 1:
+        return color, depth
+
+    depths = [depth]
+    for _ in range(depth_median_n - 1):
+        frames = arx.get_camera(target_size=(640, 480), return_status=False)
+        depth_i = frames.get("camera_h_aligned_depth_to_color")
+        if depth_i is not None:
+            depths.append(depth_i)
+    return color, np.median(np.stack(depths, axis=0), axis=0)
+
+
+def _pixel_to_camera_point(
     pixel: Tuple[int, int],
     depth_image: np.ndarray,
     K: np.ndarray,
-    T_cam2ref: np.ndarray,
 ) -> np.ndarray:
-    """像素 + 深度 -> 基坐标系 3D 点。"""
-    u, v = pixel
+    u, v = int(round(pixel[0])), int(round(pixel[1]))
     H, W = depth_image.shape
     if not (0 <= u < W and 0 <= v < H):
         raise ValueError(f"像素越界: {(u, v)} not in [0,{W})x[0,{H})")
+
     z = depth_to_meters(float(depth_image[v, u]))
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     x_cam = (u - cx) * z / fx
     y_cam = (v - cy) * z / fy
-    cam_point = np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
+    return np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
+
+
+def pixel_to_ref_point(
+    pixel: Tuple[int, int],
+    depth_image: np.ndarray,
+    robot_part: Literal["left", "right"] = "left",
+    K: np.ndarray | None = None,
+    T_left: np.ndarray | None = None,
+    T_right: np.ndarray | None = None,
+) -> np.ndarray:
+    """像素 + 深度 -> ref 坐标系 3D 点。"""
+    if K is None:
+        K = load_intrinsics()
+    cam_point = _pixel_to_camera_point(pixel, depth_image, K)
+    if robot_part == "left":
+        T_cam2ref = T_left if T_left is not None else load_cam2ref(side="left")
+    elif robot_part == "right":
+        T_cam2ref = T_right if T_right is not None else load_cam2ref(side="right")
+    else:
+        raise ValueError(f"robot_part must be left/right, got {robot_part!r}")
     ref_point = T_cam2ref @ cam_point
     return ref_point[:3]
 
@@ -103,12 +141,21 @@ def pixel_to_ref_point(
 def pixel_to_ref_point_safe(
     pixel: Tuple[int, int],
     depth_image: np.ndarray,
-    K: np.ndarray,
-    T_cam2ref: np.ndarray,
+    robot_part: Literal["left", "right"] = "left",
+    K: np.ndarray | None = None,
+    T_left: np.ndarray | None = None,
+    T_right: np.ndarray | None = None,
 ) -> np.ndarray | None:
-    """像素 + 深度 -> 基坐标系 3D 点。深度无效则返回 None。"""
+    """像素 + 深度 -> ref 3D 点。深度无效则返回 None。"""
     try:
-        return pixel_to_ref_point(pixel, depth_image, K, T_cam2ref)
+        return pixel_to_ref_point(
+            pixel,
+            depth_image,
+            robot_part=robot_part,
+            K=K,
+            T_left=T_left,
+            T_right=T_right,
+        )
     except ValueError:
         return None
 
@@ -122,18 +169,9 @@ def pixel_to_base_point(
     T_right: np.ndarray | None = None,
 ) -> np.ndarray:
     """像素 + 深度 -> 机器人工作坐标系 3D 点。"""
-    u, v = int(round(pixel[0])), int(round(pixel[1]))
-    H, W = depth_image.shape
-    if not (0 <= u < W and 0 <= v < H):
-        raise ValueError(f"像素越界: {(u, v)} not in [0,{W})x[0,{H})")
-
-    z = depth_to_meters(float(depth_image[v, u]))
     if K is None:
         K = load_intrinsics()
-    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
-    x_cam = (u - cx) * z / fx
-    y_cam = (v - cy) * z / fy
-    cam_point = np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
+    cam_point = _pixel_to_camera_point(pixel, depth_image, K)
 
     if robot_part == "right":
         T_cam2ref = T_right if T_right is not None else load_cam2ref(side="right")
@@ -171,29 +209,8 @@ def pixel_to_base_point_safe(
         return None
 
 
-def filter_valid_points(
-    uv_list: List[Tuple[int, int]],
-    depth: np.ndarray,
-    K: np.ndarray,
-    T_cam2ref: np.ndarray,
-) -> Tuple[List[Tuple[int, int]], List[np.ndarray]]:
-    """过滤深度无效的像素点并转换为 ref 坐标系 3D 点。"""
-    valid_uvs: List[Tuple[int, int]] = []
-    pt_refs: List[np.ndarray] = []
-    for uv in uv_list:
-        raw_depth = depth[uv[1], uv[0]]
-        if np.isnan(raw_depth) or raw_depth == 0:
-            print(f"预测像素 {uv} 深度无效({raw_depth})，跳过该点")
-            continue
-        ref = pixel_to_ref_point_safe(uv, depth, K, T_cam2ref)
-        if ref is None:
-            continue
-        pt_refs.append(ref)
-        valid_uvs.append(uv)
-    return valid_uvs, pt_refs
-
-
 __all__ = [
+    "get_aligned_frames",
     "load_intrinsics",
     "load_cam2ref",
     "depth_to_meters",
@@ -201,5 +218,4 @@ __all__ = [
     "pixel_to_ref_point_safe",
     "pixel_to_base_point",
     "pixel_to_base_point_safe",
-    "filter_valid_points",
 ]

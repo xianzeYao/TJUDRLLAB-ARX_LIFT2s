@@ -141,7 +141,6 @@ def execute_pick_place_cup_sequence(
     arm: str,
     do_pick: bool = True,
     do_place: bool = True,
-    go_home: bool = True,
 ) -> None:
     if do_pick:
         if pick_ref is None:
@@ -155,8 +154,6 @@ def execute_pick_place_cup_sequence(
         place_seq = build_place_cup_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step(act)
-    if go_home:
-        arx._go_to_initial_pose()
 
 
 def execute_pick_place_straw_sequence(
@@ -166,7 +163,6 @@ def execute_pick_place_straw_sequence(
     arm: str,
     do_pick: bool = True,
     do_place: bool = True,
-    go_home: bool = True,
 ) -> None:
     if do_pick:
         if pick_ref is None:
@@ -180,5 +176,3 @@ def execute_pick_place_straw_sequence(
         place_seq = build_place_straw_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step(act)
-    if go_home:
-        arx._go_to_initial_pose()

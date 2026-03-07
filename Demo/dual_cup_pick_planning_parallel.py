@@ -15,7 +15,10 @@ from motion_pick_place_cup import (
     build_pick_cup_sequence,
     build_place_cup_sequence,
 )
-from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_ref_point
+from point2pos_utils import (
+    get_aligned_frames,
+    pixel_to_ref_point_safe,
+)
 
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 from arx_ros2_env import ARXRobotEnv  # noqa
@@ -113,13 +116,13 @@ def _save_points_vis(vis_img: np.ndarray, save_path: str) -> None:
 
 def dual_arm_pick_planning_parallel(
     arx: ARXRobotEnv,
+    goal: str = "red cup",
     reset_robot: bool = True,
     close_robot: bool = True,
-    no_last_place: bool = False,
-    goal: str = "red cup",
-    go_home: bool = False,
-    single_test: bool = False,
+    debug_raw: bool = True,
     depth_median_n: int = 10,
+    no_last_place: bool = False,
+    single_test: bool = False,
     dir: Optional[str] = None,
 ):
     try:
@@ -127,9 +130,6 @@ def dual_arm_pick_planning_parallel(
             arx.reset()
         arx.step_lift(17.0)
         time.sleep(1.0)
-
-        K = load_intrinsics()
-        T_left, T_right = load_cam2ref()
 
         planned = True
         plan_steps: List[str] = []
@@ -142,16 +142,23 @@ def dual_arm_pick_planning_parallel(
             "What is the picking plan steps to finish the goal?"
         )
         confirm_win = "Planning Step"
-        cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
+        if debug_raw:
+            cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
 
         while True:
             frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             if color is None:
-                cv2.waitKey(1)
                 continue
             current_plan, current_cups = do_replan(color, planning_prompt)
+            if not debug_raw:
+                if not current_plan:
+                    continue
+                plan_steps = current_plan[:4]
+                plan_cups = current_cups[:4] if current_cups else []
+                print("规划已自动确认，进入执行模式。")
+                break
 
             vis_img = color.copy()
             prompt_lines = textwrap.wrap(planning_prompt, width=60)
@@ -198,29 +205,17 @@ def dual_arm_pick_planning_parallel(
                 break
 
         if planned:
-            cv2.destroyWindow(confirm_win)
-            win = "dual_cup_pick_planning"
-            cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+            if debug_raw:
+                cv2.destroyWindow(confirm_win)
+                win = "dual_cup_pick_planning"
+                cv2.namedWindow(win, cv2.WINDOW_NORMAL)
 
         while planned and plan_steps:
             arx.step_lift(13.0)
             time.sleep(1.0)
-            frames = arx.get_camera(
-                target_size=(640, 480), return_status=False)
-            color = frames.get("camera_h_color")
-            depth = frames.get("camera_h_aligned_depth_to_color")
+            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
-                cv2.waitKey(1)
                 continue
-            if depth_median_n > 1:
-                depths = [depth]
-                for _ in range(depth_median_n - 1):
-                    frames = arx.get_camera(
-                        target_size=(640, 480), return_status=False)
-                    d = frames.get("camera_h_aligned_depth_to_color")
-                    if d is not None:
-                        depths.append(d)
-                depth = np.median(np.stack(depths, axis=0), axis=0)
 
             target_steps = plan_steps
             if plan_cups:
@@ -238,7 +233,6 @@ def dual_arm_pick_planning_parallel(
                 if len(prompt_lines) != needed_points:
                     print(
                         f"prompt 数量异常({len(prompt_lines)}/{needed_points}), 按 r 重试")
-                    cv2.waitKey(1)
                     continue
                 pts: List[Tuple[int, int]] = []
                 for prompt in prompt_lines:
@@ -268,7 +262,6 @@ def dual_arm_pick_planning_parallel(
 
             if len(pts) < needed_points:
                 print(f"点数不足({len(pts)}/{needed_points}), 按 r 重试")
-                cv2.waitKey(1)
                 continue
 
             pts[0] = (pts[0][0], pts[0][1]-15)  # 微调第一个 pick 点位置
@@ -295,7 +288,6 @@ def dual_arm_pick_planning_parallel(
                     place_px.append(None)
 
             if p_idx == -1:
-                cv2.waitKey(1)
                 continue
 
             disp_save = _build_points_only_vis(color, pick_px, place_px)
@@ -306,63 +298,68 @@ def dual_arm_pick_planning_parallel(
                     print(f"保存预测点位图失败: {exc}")
 
             # 展示图保留 prompt 与说明；保存图不叠左上角 prompt。
-            disp_show = disp_save.copy()
-            prompt_lines_show = [f"{i+1}. {x}" for i,
-                                 x in enumerate(prompt_lines)]
-            info_lines = [
-                f"Steps: {len(plan_steps)} | no_last_place={no_last_place}",
-                "Press 'r' to re-predict, 'e' to execute, 'q' to quit",
-            ]
-            draw_text_lines(
-                disp_show,
-                ["Point Prompt:"] + prompt_lines_show + info_lines,
-                origin=(10, 25),
-                line_height=20,
-                color=(0, 0, 255),
-                scale=0.55,
-                thickness=2,
-            )
-            cv2.imshow(win, disp_show)
-            print("按 'r' 重预测，按 'e' 执行，按 'q' 退出")
+            if debug_raw:
+                disp_show = disp_save.copy()
+                prompt_lines_show = [f"{i+1}. {x}" for i,
+                                     x in enumerate(prompt_lines)]
+                info_lines = [
+                    f"Steps: {len(plan_steps)} | no_last_place={no_last_place}",
+                    "Press 'r' to re-predict, 'e' to execute, 'q' to quit",
+                ]
+                draw_text_lines(
+                    disp_show,
+                    ["Point Prompt:"] + prompt_lines_show + info_lines,
+                    origin=(10, 25),
+                    line_height=20,
+                    color=(0, 0, 255),
+                    scale=0.55,
+                    thickness=2,
+                )
+                cv2.imshow(win, disp_show)
+                print("按 'r' 重预测，按 'e' 执行，按 'q' 退出")
 
-            key = cv2.waitKey(0)
-            if key == ord("r"):
-                continue
-            if key == ord("q"):
-                break
-            if key != ord("e"):
-                continue
+                key = cv2.waitKey(0)
+                if key == ord("r"):
+                    continue
+                if key == ord("q"):
+                    break
+                if key != ord("e"):
+                    continue
 
             # 执行动作：先左后右，place 时交替另一侧 pick
             pick_refs: List[np.ndarray] = []
             place_refs: List[Optional[np.ndarray]] = []
-            valid_depth = True
             for i, p in enumerate(pick_px):
-                u, v = p
-                raw_depth = float(depth[v, u])
-                if not np.isfinite(raw_depth) or raw_depth <= 0:
-                    print(f"预测像素 {p} 深度无效({raw_depth})，按 r 重试")
-                    valid_depth = False
+                arm = _arm_for_step(i)
+                pick_ref = pixel_to_ref_point_safe(
+                    p,
+                    depth,
+                    robot_part=arm,
+                )
+                if pick_ref is None:
+                    print(f"预测像素 {p} 深度无效或像素越界，自动刷新")
+                    pick_refs = []
                     break
-                T_cam2ref = T_left if _arm_for_step(i) == "left" else T_right
-                pick_refs.append(pixel_to_ref_point(p, depth, K, T_cam2ref))
-            if valid_depth:
-                for i, p in enumerate(place_px):
-                    if p is None:
-                        place_refs.append(None)
-                        continue
-                    u, v = p
-                    raw_depth = float(depth[v, u])
-                    if not np.isfinite(raw_depth) or raw_depth <= 0:
-                        print(f"预测像素 {p} 深度无效({raw_depth})，按 r 重试")
-                        valid_depth = False
-                        break
-                    T_cam2ref = T_left if _arm_for_step(
-                        i) == "left" else T_right
-                    place_refs.append(
-                        pixel_to_ref_point(p, depth, K, T_cam2ref))
+                pick_refs.append(pick_ref)
+            if len(pick_refs) != len(pick_px):
+                continue
+            for i, p in enumerate(place_px):
+                if p is None:
+                    place_refs.append(None)
+                    continue
+                arm = _arm_for_step(i)
+                place_ref = pixel_to_ref_point_safe(
+                    p,
+                    depth,
+                    robot_part=arm,
+                )
+                if place_ref is None:
+                    print(f"预测像素 {p} 深度无效或像素越界，自动刷新")
+                    place_refs = []
+                    break
+                place_refs.append(place_ref)
 
-            if not valid_depth:
+            if len(place_refs) != len(place_px):
                 continue
 
             steps_n = len(plan_steps)
@@ -418,9 +415,6 @@ def dual_arm_pick_planning_parallel(
                 else:
                     _run_parallel_sequences(arx, None, last_place)
                 time.sleep(1.0)
-
-            if go_home:
-                arx._go_to_initial_pose()
 
             break
 

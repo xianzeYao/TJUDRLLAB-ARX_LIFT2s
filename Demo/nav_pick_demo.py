@@ -37,7 +37,6 @@ def main():
         #     reset_robot=False,
         #     close_robot=False,
         #     debug=True,
-        #     go_home=False,
         # )
         # place empty cup to making area and pick the bubble tea
         arx_nav_robot.arx.step_lift(18.0)
@@ -61,7 +60,6 @@ def main():
             reset_robot=False,
             close_robot=False,
             debug=True,
-            go_home=False,
         )
         # nav back
         arx_nav_robot.arx.step_lift(15.0)

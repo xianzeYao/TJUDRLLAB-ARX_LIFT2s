@@ -220,7 +220,13 @@ def _select_arm_from_query(query: TargetQueryResult) -> str:
     return "left" if query.point[0] < (width / 2.0) else "right"
 
 
-def on_target_found(arx: ARXRobotEnv, object_desc: str, arm: str) -> bool:
+def on_target_found(
+    arx: ARXRobotEnv,
+    object_desc: str,
+    arm: str,
+    debug_pick_place: bool,
+    depth_median_n: int,
+) -> bool:
     pick_ref, place_ref = single_arm_pick_place(
         arx=arx,
         pick_prompt=object_desc,
@@ -229,9 +235,8 @@ def on_target_found(arx: ARXRobotEnv, object_desc: str, arm: str) -> bool:
         item_type="cup",
         reset_robot=False,
         close_robot=False,
-        debug=False,
-        go_home=False,
-        depth_median_n=10,
+        debug=debug_pick_place,
+        depth_median_n=depth_median_n,
         release_after_pick=True,
     )
     if pick_ref is None and place_ref is None:
@@ -245,7 +250,9 @@ def _check_target(
     object_prompt: str,
     bool_prompt: str,
     point_prompt: str,
-    debug_scan: bool,
+    debug_raw: bool,
+    debug_pick_place: bool,
+    depth_median_n: int,
     center_region_ratio: float,
 ) -> bool:
     query = query_target(
@@ -260,7 +267,9 @@ def _check_target(
         arx=arx,
         object_prompt=object_prompt,
         query=query,
-        debug_scan=debug_scan,
+        debug_raw=debug_raw,
+        debug_pick_place=debug_pick_place,
+        depth_median_n=depth_median_n,
         center_region_ratio=center_region_ratio,
     )
 
@@ -269,13 +278,15 @@ def _handle_found_target(
     arx: ARXRobotEnv,
     object_prompt: str,
     query: TargetQueryResult,
-    debug_scan: bool,
+    debug_raw: bool,
+    debug_pick_place: bool,
+    depth_median_n: int,
     center_region_ratio: float,
     elapsed_move: Optional[float] = None,
     max_move_duration: Optional[float] = None,
 ) -> bool:
     arx.step_base(0.0, 0.0, 0.0)
-    if debug_scan:
+    if debug_raw:
         key = _show_debug_result(
             query=query,
             center_region_ratio=center_region_ratio,
@@ -287,7 +298,13 @@ def _handle_found_target(
         if key == ord("q"):
             raise UserAbortSearch("search aborted by user in debug window")
     arm = _select_arm_from_query(query)
-    return on_target_found(arx, object_prompt, arm=arm)
+    return on_target_found(
+        arx,
+        object_prompt,
+        arm=arm,
+        debug_pick_place=debug_pick_place,
+        depth_median_n=depth_median_n,
+    )
 
 
 def _scan_direction(
@@ -296,7 +313,9 @@ def _scan_direction(
     vy: float,
     obj_bool_prompt: str,
     obj_point_prompt: str,
-    debug_scan: bool,
+    debug_raw: bool,
+    debug_pick_place: bool,
+    depth_median_n: int,
     center_region_ratio: float,
     max_move_duration: float,
 ) -> bool:
@@ -323,7 +342,9 @@ def _scan_direction(
                     arx=arx,
                     object_prompt=object_prompt,
                     query=query,
-                    debug_scan=debug_scan,
+                    debug_raw=debug_raw,
+                    debug_pick_place=debug_pick_place,
+                    depth_median_n=depth_median_n,
                     center_region_ratio=center_region_ratio,
                     elapsed_move=total_elapsed,
                     max_move_duration=max_move_duration,
@@ -349,7 +370,9 @@ def search_shelf(
     max_move_duration: float = 6.0,
     reset_robot: bool = True,
     close_robot: bool = False,
-    debug_scan: bool = False,
+    debug_raw: bool = False,
+    debug_pick_place: bool = False,
+    depth_median_n: int = 10,
 ) -> bool:
     if max_layer <= 0:
         raise ValueError("max_layer must be > 0")
@@ -375,7 +398,9 @@ def search_shelf(
             object_prompt,
             obj_bool_prompt,
             obj_point_prompt,
-            debug_scan=debug_scan,
+            debug_raw=debug_raw,
+            debug_pick_place=debug_pick_place,
+            depth_median_n=depth_median_n,
             center_region_ratio=center_region_ratio,
         ):
             return True
@@ -389,7 +414,9 @@ def search_shelf(
                 vy=curr_vy,
                 obj_bool_prompt=obj_bool_prompt,
                 obj_point_prompt=obj_point_prompt,
-                debug_scan=debug_scan,
+                debug_raw=debug_raw,
+                debug_pick_place=debug_pick_place,
+                depth_median_n=depth_median_n,
                 center_region_ratio=center_region_ratio,
                 max_move_duration=max_move_duration,
             )
@@ -409,7 +436,9 @@ def search_shelf(
                 object_prompt,
                 obj_bool_prompt,
                 obj_point_prompt,
-                debug_scan=debug_scan,
+                debug_raw=debug_raw,
+                debug_pick_place=debug_pick_place,
+                depth_median_n=depth_median_n,
                 center_region_ratio=center_region_ratio,
             ):
                 return True
@@ -444,7 +473,9 @@ def main() -> None:
         center_region_ratio=0.25,
         reset_robot=True,
         close_robot=False,
-        debug_scan=False,
+        debug_raw=False,
+        debug_pick_place=False,
+        depth_median_n=10,
     )
     # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
     # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)

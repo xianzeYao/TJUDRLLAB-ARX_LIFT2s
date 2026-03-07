@@ -11,7 +11,10 @@ from demo_utils import (
     execute_pick_place_cup_sequence,
     execute_pick_place_straw_sequence,
 )
-from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_ref_point
+from point2pos_utils import (
+    get_aligned_frames,
+    pixel_to_ref_point_safe,
+)
 import time
 import sys
 
@@ -88,28 +91,6 @@ def _predict_two_points(
     return pick, place
 
 
-def _get_frame(arx: ARXRobotEnv, depth_median_n: int = 10) -> Tuple[np.ndarray, np.ndarray]:
-    while True:
-        frames = arx.get_camera(
-            target_size=(640, 480), return_status=False)
-        color = frames.get("camera_h_color")
-        depth = frames.get("camera_h_aligned_depth_to_color")
-        if color is None or depth is None:
-            cv2.waitKey(1)
-            continue
-        if depth_median_n <= 1:
-            return color, depth
-        depths = [depth]
-        for _ in range(depth_median_n - 1):
-            frames = arx.get_camera(
-                target_size=(640, 480), return_status=False)
-            d = frames.get("camera_h_aligned_depth_to_color")
-            if d is not None:
-                depths.append(d)
-        depth_med = np.median(np.stack(depths, axis=0), axis=0)
-        return color, depth_med
-
-
 def single_arm_pick_place(
     arx: ARXRobotEnv,
     pick_prompt: str,
@@ -119,7 +100,6 @@ def single_arm_pick_place(
     reset_robot: bool = True,
     close_robot: bool = True,
     debug: bool = True,
-    go_home: bool = True,
     depth_median_n: int = 10,
     release_after_pick: bool = False,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
@@ -127,16 +107,15 @@ def single_arm_pick_place(
         if reset_robot:
             arx.reset()
 
-        K = load_intrinsics()
-        T_cam2ref = load_cam2ref(side=arm)
-
         while True:
             do_pick = bool(pick_prompt)
             do_place = bool(place_prompt)
             if not do_pick and not do_place:
                 raise ValueError("pick_prompt 和 place_prompt 不能同时为空")
             time.sleep(1.5)
-            color, depth = _get_frame(arx, depth_median_n=depth_median_n)
+            color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+            if color is None or depth is None:
+                continue
             pick_px = None
             place_px = None
             if do_pick and do_place:
@@ -150,27 +129,24 @@ def single_arm_pick_place(
 
             pick_ref = None
             place_ref = None
-            valid_depth = True
             if pick_px is not None:
-                u, v = pick_px
-                raw_depth = float(depth[v, u])
-                if not np.isfinite(raw_depth) or raw_depth <= 0:
-                    print(f"预测像素 {pick_px} 深度无效({raw_depth})，按 r 重试")
-                    valid_depth = False
-            if place_px is not None and valid_depth:
-                u, v = place_px
-                raw_depth = float(depth[v, u])
-                if not np.isfinite(raw_depth) or raw_depth <= 0:
-                    print(f"预测像素 {place_px} 深度无效({raw_depth})，按 r 重试")
-                    valid_depth = False
-
-            if not valid_depth:
-                continue
-
-            if pick_px is not None:
-                pick_ref = pixel_to_ref_point(pick_px, depth, K, T_cam2ref)
+                pick_ref = pixel_to_ref_point_safe(
+                    pick_px,
+                    depth,
+                    robot_part=arm,
+                )
+                if pick_ref is None:
+                    print(f"预测像素 {pick_px} 深度无效或像素越界，自动刷新")
+                    continue
             if place_px is not None:
-                place_ref = pixel_to_ref_point(place_px, depth, K, T_cam2ref)
+                place_ref = pixel_to_ref_point_safe(
+                    place_px,
+                    depth,
+                    robot_part=arm,
+                )
+                if place_ref is None:
+                    print(f"预测像素 {place_px} 深度无效或像素越界，自动刷新")
+                    continue
 
             vis = color.copy()
             lines = []
@@ -212,7 +188,6 @@ def single_arm_pick_place(
                     arm=arm,
                     do_pick=do_pick,
                     do_place=do_place,
-                    go_home=go_home,
                 )
             elif item_type == "straw":
                 execute_pick_place_straw_sequence(
@@ -222,7 +197,6 @@ def single_arm_pick_place(
                     arm=arm,
                     do_pick=do_pick,
                     do_place=do_place,
-                    go_home=go_home,
                 )
             else:
                 raise ValueError(f"unknown item_type: {item_type!r}")

@@ -8,21 +8,12 @@ import cv2
 from arx5_arm_msg.msg._robot_cmd import RobotCmd
 from motion_swap import build_swap_sequence  # 控制命令
 from demo_utils import step_base_duration
-from point2pos_utils import load_cam2ref, load_intrinsics, pixel_to_base_point
+from point2pos_utils import (
+    get_aligned_frames,
+    pixel_to_base_point_safe,
+)
 from arx_pointing import predict_point_from_rgb
 from arm_control.msg._pos_cmd import PosCmd
-
-
-def _get_frame(arx: ARXRobotEnv):
-    while True:
-        frames = arx.get_camera(
-            target_size=(640, 480), return_status=False)
-        color = frames.get("camera_h_color")
-        depth = frames.get("camera_h_aligned_depth_to_color")
-        if color is None or depth is None:
-            cv2.waitKey(1)
-            continue
-        return color, depth
 
 
 def main():
@@ -58,24 +49,21 @@ def main():
         # step_base_duration(arx, vx=0.75, vy=0.0, vz=0.0, duration=2.0)
         # step_base_duration(arx, vx=-0.5, vy=0.0, vz=0.0, duration=5.0)
         # 简单detect白色纸团
-        K = load_intrinsics()
-        T_left = load_cam2ref(side="left")
         trash_prompt = "a white crumpled paper on the floor"
         while True:
-            color, depth = _get_frame(arx)
+            color, depth = get_aligned_frames(arx)
+            if color is None or depth is None:
+                continue
             trash_point = predict_point_from_rgb(color, trash_prompt)
             u, v = int(round(trash_point[0])), int(round(trash_point[1]))
-            raw_depth = float(depth[v, u])
-            if not np.isfinite(raw_depth) or raw_depth <= 0:
-                print(f"预测像素 {(u, v)} 深度无效({raw_depth})，按 r 刷新")
-                continue
-            trash_base_point = pixel_to_base_point(
+            trash_base_point = pixel_to_base_point_safe(
                 (u, v),
                 depth,
                 robot_part="center",
-                K=K,
-                T_left=T_left,
             )
+            if trash_base_point is None:
+                print(f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新")
+                continue
             print(f"trash_base_point: {trash_base_point}")
             vis = color.copy()
             cv2.circle(vis, (u, v), 3, (0, 0, 255), -1)

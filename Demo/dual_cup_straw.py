@@ -11,8 +11,17 @@ OPEN = -3.4
 CLOSE = -2.2
 
 
-def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
+def dual_cup_straw(
+    arx: ARXRobotEnv,
+    cup_side: str = "left",
+    reset_robot: bool = True,
+    close_robot: bool = True,
+    debug_pick_place: bool = True,
+    depth_median_n: int = 10,
+):
     try:
+        if reset_robot:
+            arx.reset()
         # arx.step_lift(14.0)
         # single_arm_pick_place(
         #     arx,
@@ -22,7 +31,6 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
         #     reset_robot=False,
         #     close_robot=False,
         #     debug=True,
-        #     go_home=False,
         # )
         # step_base_duration(arx, vx=0.0, vy=0.0, vz=-0.5, duration=10.3)
         # step_base_duration(arx, vx=0.5, vy=0.0, vz=0.0, duration=10.0)
@@ -39,8 +47,8 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
             item_type="straw",
             reset_robot=False,
             close_robot=False,
-            debug=True,
-            go_home=False,
+            debug=debug_pick_place,
+            depth_median_n=depth_median_n,
         )
 
         # 右转90度
@@ -61,8 +69,8 @@ def dual_cup_straw(arx: ARXRobotEnv, cup_side="left", close_robot=True):
             item_type="straw",
             reset_robot=False,
             close_robot=False,
-            debug=True,
-            go_home=False,
+            debug=debug_pick_place,
+            depth_median_n=depth_median_n,
         )
         # 拿吸管的手回到初始位姿
         one_arm_home_action = {straw_side: np.array(
