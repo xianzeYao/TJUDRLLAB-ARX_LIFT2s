@@ -22,7 +22,7 @@ def make_swap_left_action(pt_ref: Optional[np.ndarray],) -> Dict[str, np.ndarray
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     action = {"right":  np.array(
         [base[0]-GRIPPER_OFFSET+0.02, base[1] +
-            SWAP_OFFSET+0.3, 0.002, 0.4, 0, 0, 0.0],
+            SWAP_OFFSET+0.3, 0.0025, 0.4, 0, 0, 0.0],
         dtype=np.float32)}
     return action
 

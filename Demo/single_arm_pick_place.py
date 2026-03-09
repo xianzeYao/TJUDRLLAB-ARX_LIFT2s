@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Literal
 import cv2
 import numpy as np
 
-from arx_pointing import predict_multi_points_from_rgb
+from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb
 from demo_utils import (
     draw_text_lines,
     execute_pick_place_cup_sequence,
@@ -49,22 +49,12 @@ def _release_gripper_at_current_eef(
 
 
 def _predict_one_point(color: np.ndarray, base_prompt: str) -> Tuple[int, int]:
-    full_prompt = (
-        "Provide exactly one point coordinate of objects region this sentence describes: "
-        f"{base_prompt} "
-        'The answer should be presented in JSON format as follows: [{"point_2d": [x, y]}]. '
-        "Return only JSON."
-    )
-    points = predict_multi_points_from_rgb(
+    u, v = predict_point_from_rgb(
         color,
-        text_prompt="",
-        all_prompt=full_prompt,
+        text_prompt=base_prompt,
         assume_bgr=False,
         temperature=0.0,
     )
-    if not points:
-        raise RuntimeError("未解析到坐标")
-    u, v = points[0]
     return int(round(u)), int(round(v))
 
 
@@ -121,14 +111,18 @@ def single_arm_pick_place(
                 continue
             pick_px = None
             place_px = None
-            if do_pick and do_place:
-                pick_px, place_px = _predict_two_points(
-                    color, pick_prompt, place_prompt
-                )
-            elif do_pick:
-                pick_px = _predict_one_point(color, pick_prompt)
-            else:
-                place_px = _predict_one_point(color, place_prompt)
+            try:
+                if do_pick and do_place:
+                    pick_px, place_px = _predict_two_points(
+                        color, pick_prompt, place_prompt
+                    )
+                elif do_pick:
+                    pick_px = _predict_one_point(color, pick_prompt)
+                else:
+                    place_px = _predict_one_point(color, place_prompt)
+            except RuntimeError as exc:
+                print(f"点位预测失败，自动刷新：{exc}")
+                continue
 
             if arm_side == "fit":
                 ref_pixel = pick_px if pick_px is not None else place_px

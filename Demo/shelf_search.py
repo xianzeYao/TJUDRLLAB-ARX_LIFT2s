@@ -267,7 +267,8 @@ def _handle_found_target(
             if elapsed_move is None or max_move_duration is None:
                 remaining_move_duration = 0.0
             else:
-                remaining_move_duration = max(max_move_duration - elapsed_move, 0.0)
+                remaining_move_duration = max(
+                    max_move_duration - elapsed_move, 0.0)
             raise UserAbortSearch(remaining_move_duration)
     return on_target_found(
         arx,
@@ -495,35 +496,38 @@ def main() -> None:
     try:
         arx.reset()
         v = 0.6
-        max_move_duration = 5
+        max_move_duration = 8
         result = search_shelf(
             arx=arx,
-            object_prompt="a red horse",
+            object_prompt="a tennis ball",
             v=v,
             check_interval=0.2,
             max_move_duration=max_move_duration,
             drop_height=10.0,
             max_layer=3,
             center_region_ratio=0.3,
-            debug_raw=True,
-            debug_pick_place=True,
+            debug_raw=False,
+            debug_pick_place=False,
             depth_median_n=5,
         )
-        v_continue = v if result.layer_index%2==1 else -v
         # 回归search原位
-        step_base_duration(arx, 0.0, v_continue, 0.0, duration=result.remaining_move_duration)
+        continue_duration = max_move_duration - \
+            result.remaining_move_duration if result.layer_index % 2 == 1 else result.remaining_move_duration
+        step_base_duration(arx, 0.0, -v, 0.0,
+                           duration=continue_duration)
         # 顺时针旋转180度，直走，再逆时针旋转90度
+
         step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=12)
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=20)
+        arx.step_lift(14.0)
         step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
-        # 靠近桌子
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=0.5)
-        # 放置
+        # 抬高一点靠近桌子
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=0.8)
         single_arm_pick_place(
             arx=arx,
             pick_prompt="",
             place_prompt="the center part of square plate",
-            arm_side=result.arm_used or "fit",
+            arm_side=result.arm_used,
             item_type="cup",
             debug=True,
             depth_median_n=5,

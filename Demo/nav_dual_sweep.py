@@ -112,7 +112,7 @@ def main():
         nav_dual_sweep(
             arx,
             goal="white paper balls on the floor",
-            distance=0.59,
+            distance=0.57,
             nav_debug_raw=True,
             swap_debug_raw=True,
             nav_depth_median_n=2,

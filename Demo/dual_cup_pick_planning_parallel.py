@@ -27,7 +27,7 @@ COASTER_PROMPTS = [
     "the center of coaster (the left one near cups most)",
     "the center of coaster (the right one near cups most)",
     "the center of coaster (the leftmost one)",
-    "the coaster (the rightmost one)",
+    "the center of coaster (the rightmost one)",
 ]
 
 
@@ -120,6 +120,19 @@ def _save_points_vis(vis_img: np.ndarray, save_path: str) -> None:
     print(f"预测点位图已保存: {out}")
 
 
+def _build_planning_prompt(goal_cup: str) -> str:
+    # return (
+    #     f"Current Goal is: pick the {goal_cup}. "
+    #         "I need to pick up the cups from top to the goal cup."
+    #         "What is the picking plan steps to finish the goal?"
+    # )
+    return (
+        f"Current Goal is: pick the {goal_cup}. "
+        "I need to pick up the cups from top to the goal cup."
+        "What is the picking plan with minimal steps to finish the goal?"
+    )
+
+
 def dual_arm_pick_planning_parallel(
     arx: ARXRobotEnv,
     goal: str = "red cup",
@@ -139,11 +152,7 @@ def dual_arm_pick_planning_parallel(
         plan_cups: List[str] = []
 
         goal_cup = goal
-        planning_prompt = (
-            f"Current Goal is: pick the {goal_cup}. "
-            "I need to pick up the cups from top to the goal cup."
-            "What is the picking plan steps to finish the goal?"
-        )
+        planning_prompt = _build_planning_prompt(goal_cup)
         confirm_win = "Planning Step"
         if debug_raw:
             cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
@@ -195,11 +204,7 @@ def dual_arm_pick_planning_parallel(
                 new_goal = input("输入新的需求 (留空保持当前): ").strip()
                 if new_goal:
                     goal_cup = new_goal
-                    planning_prompt = (
-                        f"Current Goal is: pick the {goal_cup}. "
-                        "I need to pick up the cups from top to the goal cup."
-                        "What is the picking plan steps to finish the goal?"
-                    )
+                    planning_prompt = _build_planning_prompt(goal_cup)
                     print(f"新的 pick prompt 已设置为: {planning_prompt!r}")
                 continue
             if key == ord("q"):
@@ -428,10 +433,10 @@ def dual_arm_pick_planning_parallel(
 
 def main():
     arx = ARXRobotEnv(
-        duration_per_step=1.0 / 35.0,
-        min_steps=20,
-        max_v_xyz=0.18, max_a_xyz=0.2,
-        max_v_rpy=0.58, max_a_rpy=0.8,
+        duration_per_step=1.0 / 40.0,
+        min_steps=30,
+        max_v_xyz=0.15, max_a_xyz=0.1,
+        max_v_rpy=0.5, max_a_rpy=0.6,
         camera_type="all",
         camera_view=("camera_h",),
         img_size=(640, 480),
@@ -444,13 +449,12 @@ def main():
         arx.reset()
         dual_arm_pick_planning_parallel(
             arx,
-            goal="red cup",
-            no_last_place=True,
+            goal="orange cup",
+            no_last_place=False,
             single_test=True,
             # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
             depth_median_n=5,
         )
-        time.sleep(10.0)
     finally:
         arx.close()
 

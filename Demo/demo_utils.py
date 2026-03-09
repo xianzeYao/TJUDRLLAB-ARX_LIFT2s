@@ -29,7 +29,8 @@ def _extract_cup_phrases(text: str) -> List[str]:
 
 
 def _unwrap_answer_block(raw: str) -> str:
-    match = re.search(r"<answer>(.*?)</answer>", raw, flags=re.DOTALL | re.IGNORECASE)
+    match = re.search(r"<answer>(.*?)</answer>", raw,
+                      flags=re.DOTALL | re.IGNORECASE)
     if not match:
         return raw
     return match.group(1).strip()
@@ -101,7 +102,8 @@ def do_replan(
         if pick_plan:
             return pick_plan, cups
 
-    raise RuntimeError(f"failed to parse planning result after {max_retries} retries: {last_text!r}")
+    raise RuntimeError(
+        f"failed to parse planning result after {max_retries} retries: {last_text!r}")
 
 
 def draw_text_lines(
