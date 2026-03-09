@@ -110,7 +110,16 @@ def main():
                       camera_view=("camera_h",),
                       img_size=(640, 480))
     try:
-        arx.reset()
+        single_arm_pick_place(
+            arx,
+            arm="left",
+            pick_prompt="the green cup on the left coaster",
+            place_prompt="",
+            reset_robot=True,
+            close_robot=False,
+            debug=False,
+            depth_median_n=10,
+        )
         dual_cup_straw(arx, cup_side="left",
                        debug_pick_place=True, depth_median_n=10)
         special_give(arx, cup_side="left")

@@ -28,6 +28,13 @@ def _extract_cup_phrases(text: str) -> List[str]:
     return phrases
 
 
+def _unwrap_answer_block(raw: str) -> str:
+    match = re.search(r"<answer>(.*?)</answer>", raw, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return raw
+    return match.group(1).strip()
+
+
 def extract_numbered_sentences(raw: Optional[str]) -> Tuple[List[str], List[str]]:
     """提取形如 '1. xxx' / '2) xxx' / '3- xxx' 的编号句子，并提取 'xx cup'。"""
     if not raw:
@@ -36,6 +43,7 @@ def extract_numbered_sentences(raw: Optional[str]) -> Tuple[List[str], List[str]
     raw_clean = re.sub(
         r"```(?:json|python)?\n?(.*?)\n?```", r"\1", raw, flags=re.DOTALL
     )
+    raw_clean = _unwrap_answer_block(raw_clean)
     steps: List[str] = []
 
     # 行内 / 行间匹配：1. xxx 2) yyy 3- zzz
@@ -54,30 +62,46 @@ def extract_numbered_sentences(raw: Optional[str]) -> Tuple[List[str], List[str]
         if s not in seen:
             seen.add(s)
             uniq_steps.append(s)
+    if not uniq_steps:
+        # 兼容模型返回非编号的逐行答案。
+        fallback_lines = [
+            line.strip(" -*\t")
+            for line in raw_clean.splitlines()
+            if line.strip()
+        ]
+        uniq_steps = fallback_lines
+
     cup_text = " ".join(uniq_steps) if uniq_steps else raw_clean
     cups = _extract_cup_phrases(cup_text)
     return uniq_steps, cups
 
 
-def do_replan(color_img: np.ndarray, planning_prompt: str) -> Tuple[List[str], List[str]]:
-    raw_result = predict_multi_points_from_rgb(
-        color_img,
-        text_prompt="",
-        all_prompt=planning_prompt,
-        assume_bgr=False,
-        return_raw=True,
-        temperature=0.0,
-    )
-    if isinstance(raw_result, tuple):
-        _, pick_answer_text = raw_result
-    else:
-        pick_answer_text = None
+def do_replan(
+    color_img: np.ndarray,
+    planning_prompt: str,
+    max_retries: int = 5,
+) -> Tuple[List[str], List[str]]:
+    last_text: Optional[str] = None
+    for _ in range(max_retries):
+        raw_result = predict_multi_points_from_rgb(
+            color_img,
+            text_prompt="",
+            all_prompt=planning_prompt,
+            assume_bgr=False,
+            return_raw=True,
+            temperature=0.0,
+        )
+        if isinstance(raw_result, tuple):
+            _, pick_answer_text = raw_result
+        else:
+            pick_answer_text = None
 
-    pick_plan, cups = extract_numbered_sentences(pick_answer_text)
-    if not pick_plan:
-        # 递归重试
-        return do_replan(color_img=color_img, planning_prompt=planning_prompt)
-    return pick_plan, cups
+        last_text = pick_answer_text
+        pick_plan, cups = extract_numbered_sentences(pick_answer_text)
+        if pick_plan:
+            return pick_plan, cups
+
+    raise RuntimeError(f"failed to parse planning result after {max_retries} retries: {last_text!r}")
 
 
 def draw_text_lines(

@@ -42,3 +42,12 @@ planning_pick_prompt = """Given an RGB image, output the minimal sequence of cup
 plannig_place_prompt = """"1. Point to top of the xxx cup.
                            2. Point to top of the xxx cup.
                            - Output the pixel coordinates of the center points."""
+
+shelf project pick_prompt:
+1. a white chewing gum cylinder can
+2. a yellow glue
+3. a rubik's cube
+4. a tennis ball
+5. a red hourse
+6. a chip cylindrical container
+7. a pink box

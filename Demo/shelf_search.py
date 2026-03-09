@@ -25,6 +25,9 @@ class UserAbortSearch(Exception):
     pass
 
 
+DEFAULT_CHECK_INTERVAL = 0.2
+
+
 @dataclass
 class TargetQueryResult:
     color: np.ndarray
@@ -179,6 +182,7 @@ def query_target(
     point_prompt: str,
     center_region_ratio: float,
 ) -> TargetQueryResult:
+    start = time.time()
     color = get_color_frame(arx)
     bool_result = ask_bool(color, bool_prompt)
     point = None
@@ -186,6 +190,8 @@ def query_target(
     if bool_result:
         point, _ = ask_point(color, point_prompt)
     result = bool_result and _point_in_bounds(point, bounds)
+    elapsed = time.time() - start
+    print(f"query_target elapsed: {elapsed:.3f}s")
     return TargetQueryResult(
         color=color,
         bool_result=bool_result,
@@ -206,10 +212,9 @@ def target_bool_prompt(object_desc: str) -> str:
 def target_point_prompt(object_desc: str) -> str:
     safe_desc = object_desc.replace('"', '\\"')
     return (
-        "Provide exactly one point coordinate of the object region matching this description: "
-        f'"{safe_desc}". '
-        'If no such object exists, return []. Format: [{"point_2d": [x, y]}]. '
-        "Return only JSON."
+        "Provide one or more points coordinate of objects region this sentence describes: "
+            f"{safe_desc}. "
+            'The answer should be presented in JSON format as follows: [{"point_2d": [x, y]}].'
     )
 
 
@@ -306,6 +311,7 @@ def _scan_direction(
     depth_median_n: int,
     center_region_ratio: float,
     max_move_duration: float,
+    check_interval: float,
 ) -> bool:
     vx, vz = 0.0, 0.0
     moved_duration = 0.0
@@ -316,6 +322,7 @@ def _scan_direction(
         arx.step_base(vx=vx, vy=vy, vz=vz)
 
         while time.time() - phase_start < remaining_duration:
+            check_start = time.time()
             query = query_target(
                 arx=arx,
                 bool_prompt=obj_bool_prompt,
@@ -340,6 +347,9 @@ def _scan_direction(
                     return True
                 moved_duration = total_elapsed
                 break
+            sleep_time = check_interval - (time.time() - check_start)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
         else:
             moved_duration = max_move_duration
 
@@ -356,6 +366,7 @@ def search_shelf(
     max_layer: int,
     center_region_ratio: float = 0.6,
     max_move_duration: float = 6.0,
+    check_interval: float = DEFAULT_CHECK_INTERVAL,
     debug_raw: bool = False,
     debug_pick_place: bool = False,
     depth_median_n: int = 10,
@@ -368,6 +379,8 @@ def search_shelf(
         raise ValueError("center_region_ratio must be in (0, 1]")
     if max_move_duration <= 0:
         raise ValueError("max_move_duration must be > 0")
+    if check_interval < 0:
+        raise ValueError("check_interval must be >= 0")
     start_height = 20.0
 
     try:
@@ -403,6 +416,7 @@ def search_shelf(
                 depth_median_n=depth_median_n,
                 center_region_ratio=center_region_ratio,
                 max_move_duration=max_move_duration,
+                check_interval=check_interval,
             )
             if layer_hit:
                 return True
@@ -449,12 +463,13 @@ def main() -> None:
         arx.reset()
         search_shelf(
             arx=arx,
-            object_prompt="a yellow glue",
-            v=0.8,
-            max_move_duration=5.0,
+            object_prompt="a red horse",
+            v=0.5,
+            check_interval=0.2,
+            max_move_duration=5,
             drop_height=10.0,
             max_layer=3,
-            center_region_ratio=0.25,
+            center_region_ratio=0.3,
             debug_raw=True,
             debug_pick_place=True,
             depth_median_n=10,

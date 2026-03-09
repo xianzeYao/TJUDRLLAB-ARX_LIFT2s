@@ -5,7 +5,7 @@ CLOSE = 0.0
 OPEN = -3.3
 GRIPPER_OFFSET = 0.15
 GRIPPER_CUP = -0.5
-# GRIPPER_CUP = -1.9 # for pick
+# GRIPPER_CUP = -2.2 # for pick
 Z_CUP = 0.045
 
 

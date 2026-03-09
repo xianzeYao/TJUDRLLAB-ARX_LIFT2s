@@ -145,7 +145,7 @@ def _execute_nav_actions(
     for action, value in actions:
         if action == "rotate":
             if value <= 0:
-                duration = max(-value - 0.1, 0.0) / BASE_ROTATE_SPEED
+                duration = max(-value - 0.1, 0.1) / BASE_ROTATE_SPEED
                 step_base_duration(arx, vx=0.0, vy=0.0, vz=-
                                    0.5, duration=float(duration))
             else:

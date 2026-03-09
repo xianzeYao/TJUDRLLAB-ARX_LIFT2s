@@ -1,5 +1,7 @@
 import time
 import sys
+import select
+import termios
 from typing import Optional
 
 import cv2
@@ -14,6 +16,26 @@ from point2pos_utils import (
     get_aligned_frames,
     pixel_to_base_point_safe,
 )
+
+
+def _get_key_nonblock():
+    dr, _, _ = select.select([sys.stdin], [], [], 0)
+    if dr:
+        return sys.stdin.read(1)
+    return None
+
+
+def _init_keyboard():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    new_settings = termios.tcgetattr(fd)
+    new_settings[3] = new_settings[3] & ~termios.ICANON & ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+    return old_settings
+
+
+def _restore_keyboard(old_settings):
+    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
 
 def pick_tools(arx: ARXRobotEnv) -> None:
@@ -86,13 +108,23 @@ def _detect_swap_target(
         win = "dual_swap_detect"
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
         cv2.imshow(win, vis)
-        key = cv2.waitKey(0)
-        cv2.destroyWindow(win)
-        if key == ord("r"):
-            continue
-        if key == ord("q"):
-            return None
-        return trash_base_point
+        while True:
+            key = _get_key_nonblock()
+            if key == "q":
+                cv2.destroyWindow(win)
+                return None
+
+            cv_key = cv2.waitKey(50)
+            if cv_key < 0:
+                continue
+
+            cv2.destroyWindow(win)
+            if cv_key == ord("r"):
+                break
+            if cv_key == ord("q"):
+                return None
+            return trash_base_point
+        continue
 
 
 def dual_swap(
@@ -101,6 +133,7 @@ def dual_swap(
     debug_raw: bool = True,
     depth_median_n: int = 10,
 ) -> Optional[np.ndarray]:
+    old_settings = _init_keyboard()
     try:
         target_base_point = _detect_swap_target(
             arx,
@@ -117,6 +150,7 @@ def dual_swap(
         return target_base_point
     finally:
         cv2.destroyAllWindows()
+        _restore_keyboard(old_settings)
 
 
 def main():

@@ -428,10 +428,10 @@ def dual_arm_pick_planning_parallel(
 
 def main():
     arx = ARXRobotEnv(
-        duration_per_step=1.0 / 20.0,
+        duration_per_step=1.0 / 35.0,
         min_steps=20,
-        max_v_xyz=0.15, max_a_xyz=0.15,
-        max_v_rpy=0.3, max_a_rpy=1.00,
+        max_v_xyz=0.18, max_a_xyz=0.2,
+        max_v_rpy=0.58, max_a_rpy=0.8,
         camera_type="all",
         camera_view=("camera_h",),
         img_size=(640, 480),
@@ -448,7 +448,7 @@ def main():
             no_last_place=True,
             single_test=True,
             # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
-            depth_median_n=15,
+            depth_median_n=10,
         )
         time.sleep(10.0)
     finally:
