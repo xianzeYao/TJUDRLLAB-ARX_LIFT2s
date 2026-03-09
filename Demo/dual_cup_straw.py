@@ -121,7 +121,7 @@ def main():
             depth_median_n=10,
         )
         dual_cup_straw(arx, cup_side="left",
-                       debug_pick_place=True, depth_median_n=10)
+                       debug_pick_place=True, depth_median_n=5)
         special_give(arx, cup_side="left")
     finally:
         arx.close()

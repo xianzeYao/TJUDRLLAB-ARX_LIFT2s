@@ -448,7 +448,7 @@ def main():
             no_last_place=True,
             single_test=True,
             # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
-            depth_median_n=10,
+            depth_median_n=5,
         )
         time.sleep(10.0)
     finally:

@@ -107,7 +107,7 @@ def single_arm_pick_place(
     debug: bool = True,
     depth_median_n: int = 10,
     release_after_pick: bool = False,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Literal["left", "right"]]]:
     try:
         while True:
             do_pick = bool(pick_prompt)
@@ -187,7 +187,7 @@ def single_arm_pick_place(
                 if key == ord("r"):
                     continue
                 if key == ord("q"):
-                    return None, None
+                    return None, None, None
                 # 默认确认
             else:
                 cv2.destroyAllWindows()
@@ -217,7 +217,7 @@ def single_arm_pick_place(
                     arx=arx,
                     arm=arm,
                 )
-            return pick_ref, place_ref
+            return pick_ref, place_ref, arm
     finally:
         cv2.destroyAllWindows()
 
@@ -247,7 +247,7 @@ def main():
     pick_prompt = "the cup on the left brown coaster"
     try:
         single_arm_pick_place(arx, pick_prompt=pick_prompt, place_prompt="",
-                              debug=True, depth_median_n=15)
+                              debug=True, depth_median_n=5)
     finally:
         arx.close()
 

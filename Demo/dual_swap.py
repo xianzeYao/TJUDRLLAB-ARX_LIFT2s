@@ -172,7 +172,7 @@ def main():
             arx,
             object_prompt="a white crumpled paper on the floor",
             debug_raw=True,
-            depth_median_n=10,
+            depth_median_n=5,
         )
         release_tools(arx)
     finally:

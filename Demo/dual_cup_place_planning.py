@@ -591,7 +591,7 @@ def main():
     )
     try:
         arx.reset()
-        dual_cup_place_planning(arx, manual=True, depth_median_n=15)
+        dual_cup_place_planning(arx, manual=True, depth_median_n=10)
     finally:
         arx.close()
 

@@ -22,7 +22,9 @@ from arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
 class UserAbortSearch(Exception):
-    pass
+    def __init__(self, remaining_move_duration: float):
+        super().__init__("search aborted by user")
+        self.remaining_move_duration = remaining_move_duration
 
 
 DEFAULT_CHECK_INTERVAL = 0.2
@@ -37,6 +39,22 @@ class TargetQueryResult:
     result: bool
 
 
+@dataclass
+class ShelfSearchResult:
+    success: bool
+    remaining_move_duration: float
+    layer_index: int
+    arm_used: Optional[str] = None
+    aborted: bool = False
+
+
+@dataclass
+class ScanDirectionResult:
+    success: bool
+    remaining_move_duration: float
+    arm_used: Optional[str] = None
+
+
 def get_color_frame(arx: ARXRobotEnv) -> np.ndarray:
     target_size = (640, 480)
     camera_key = "camera_h_color"
@@ -47,30 +65,6 @@ def get_color_frame(arx: ARXRobotEnv) -> np.ndarray:
         if color is not None:
             return color
         time.sleep(0.05)
-
-
-def ask_point(color: np.ndarray, prompt: str) -> tuple[Optional[tuple[int, int]], Optional[str]]:
-    try:
-        points, raw = predict_multi_points_from_rgb(
-            image=color,
-            text_prompt="",
-            all_prompt=prompt,
-            base_url="http://172.28.102.11:22002/v1",
-            model_name="Embodied-R1.5-SFT-0128",
-            api_key="EMPTY",
-            assume_bgr=False,
-            temperature=0.0,
-            max_tokens=128,
-            return_raw=True,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"ER1.5 call failed: {exc}") from exc
-
-    if not points:
-        return None, raw
-
-    u, v = points[0]
-    return (int(round(u)), int(round(v))), raw
 
 
 def parse_bool(text: str) -> Optional[bool]:
@@ -95,12 +89,8 @@ def ask_bool(color: np.ndarray, prompt: str) -> bool:
             image=color,
             text_prompt="",
             all_prompt=prompt,
-            base_url="http://172.28.102.11:22002/v1",
-            model_name="Embodied-R1.5-SFT-0128",
-            api_key="EMPTY",
             assume_bgr=False,
             temperature=0.0,
-            max_tokens=128,
             return_raw=True,
         )
     except Exception as exc:
@@ -188,7 +178,20 @@ def query_target(
     point = None
     bounds = _center_region_bounds(color, ratio=center_region_ratio)
     if bool_result:
-        point, _ = ask_point(color, point_prompt)
+        try:
+            points, _ = predict_multi_points_from_rgb(
+                image=color,
+                text_prompt="",
+                all_prompt=point_prompt,
+                assume_bgr=False,
+                temperature=0.0,
+                return_raw=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"ER1.5 call failed: {exc}") from exc
+        if points:
+            u, v = points[0]
+            point = (int(round(u)), int(round(v)))
     result = bool_result and _point_in_bounds(point, bounds)
     elapsed = time.time() - start
     print(f"query_target elapsed: {elapsed:.3f}s")
@@ -213,8 +216,8 @@ def target_point_prompt(object_desc: str) -> str:
     safe_desc = object_desc.replace('"', '\\"')
     return (
         "Provide one or more points coordinate of objects region this sentence describes: "
-            f"{safe_desc}. "
-            'The answer should be presented in JSON format as follows: [{"point_2d": [x, y]}].'
+        f"{safe_desc}. "
+        'The answer should be presented in JSON format as follows: [{"point_2d": [x, y]}].'
     )
 
 
@@ -223,8 +226,8 @@ def on_target_found(
     object_desc: str,
     debug_pick_place: bool,
     depth_median_n: int,
-) -> bool:
-    pick_ref, place_ref = single_arm_pick_place(
+) -> tuple[bool, Optional[str]]:
+    pick_ref, place_ref, arm_used = single_arm_pick_place(
         arx=arx,
         pick_prompt=object_desc,
         place_prompt="",
@@ -232,41 +235,11 @@ def on_target_found(
         item_type="cup",
         debug=debug_pick_place,
         depth_median_n=depth_median_n,
-        release_after_pick=True,
     )
-    if pick_ref is None and place_ref is None:
+    if pick_ref is None and place_ref is None and arm_used is None:
         print("pick canceled, continue shelf search")
-        return False
-    return True
-
-
-def _check_target(
-    arx: ARXRobotEnv,
-    object_prompt: str,
-    bool_prompt: str,
-    point_prompt: str,
-    debug_raw: bool,
-    debug_pick_place: bool,
-    depth_median_n: int,
-    center_region_ratio: float,
-) -> bool:
-    query = query_target(
-        arx=arx,
-        bool_prompt=bool_prompt,
-        point_prompt=point_prompt,
-        center_region_ratio=center_region_ratio,
-    )
-    if not query.result:
-        return False
-    return _handle_found_target(
-        arx=arx,
-        object_prompt=object_prompt,
-        query=query,
-        debug_raw=debug_raw,
-        debug_pick_place=debug_pick_place,
-        depth_median_n=depth_median_n,
-        center_region_ratio=center_region_ratio,
-    )
+        return False, None
+    return True, arm_used
 
 
 def _handle_found_target(
@@ -279,7 +252,7 @@ def _handle_found_target(
     center_region_ratio: float,
     elapsed_move: Optional[float] = None,
     max_move_duration: Optional[float] = None,
-) -> bool:
+) -> tuple[bool, Optional[str]]:
     arx.step_base(0.0, 0.0, 0.0)
     if debug_raw:
         key = _show_debug_result(
@@ -289,9 +262,13 @@ def _handle_found_target(
             max_move_duration=max_move_duration,
         )
         if key == ord("r"):
-            return False
+            return False, None
         if key == ord("q"):
-            raise UserAbortSearch("search aborted by user in debug window")
+            if elapsed_move is None or max_move_duration is None:
+                remaining_move_duration = 0.0
+            else:
+                remaining_move_duration = max(max_move_duration - elapsed_move, 0.0)
+            raise UserAbortSearch(remaining_move_duration)
     return on_target_found(
         arx,
         object_prompt,
@@ -312,7 +289,7 @@ def _scan_direction(
     center_region_ratio: float,
     max_move_duration: float,
     check_interval: float,
-) -> bool:
+) -> ScanDirectionResult:
     vx, vz = 0.0, 0.0
     moved_duration = 0.0
 
@@ -333,7 +310,7 @@ def _scan_direction(
             total_elapsed = moved_duration + elapsed
             if query.result:
                 print("True")
-                if _handle_found_target(
+                found, arm_used = _handle_found_target(
                     arx=arx,
                     object_prompt=object_prompt,
                     query=query,
@@ -343,8 +320,14 @@ def _scan_direction(
                     center_region_ratio=center_region_ratio,
                     elapsed_move=total_elapsed,
                     max_move_duration=max_move_duration,
-                ):
-                    return True
+                )
+                if found:
+                    return ScanDirectionResult(
+                        success=True,
+                        remaining_move_duration=max(
+                            max_move_duration - total_elapsed, 0.0),
+                        arm_used=arm_used,
+                    )
                 moved_duration = total_elapsed
                 break
             sleep_time = check_interval - (time.time() - check_start)
@@ -355,7 +338,11 @@ def _scan_direction(
 
         arx.step_base(0.0, 0.0, 0.0)
 
-    return False
+    return ScanDirectionResult(
+        success=False,
+        remaining_move_duration=0.0,
+        arm_used=None,
+    )
 
 
 def search_shelf(
@@ -370,7 +357,7 @@ def search_shelf(
     debug_raw: bool = False,
     debug_pick_place: bool = False,
     depth_median_n: int = 10,
-) -> bool:
+) -> ShelfSearchResult:
     if max_layer <= 0:
         raise ValueError("max_layer must be > 0")
     if drop_height <= 0:
@@ -390,22 +377,38 @@ def search_shelf(
         obj_bool_prompt = target_bool_prompt(object_prompt)
         obj_point_prompt = target_point_prompt(object_prompt)
 
-        if _check_target(
-            arx,
-            object_prompt,
-            obj_bool_prompt,
-            obj_point_prompt,
-            debug_raw=debug_raw,
-            debug_pick_place=debug_pick_place,
-            depth_median_n=depth_median_n,
+        query = query_target(
+            arx=arx,
+            bool_prompt=obj_bool_prompt,
+            point_prompt=obj_point_prompt,
             center_region_ratio=center_region_ratio,
-        ):
-            return True
+        )
+        if query.result:
+            found, arm_used = _handle_found_target(
+                arx=arx,
+                object_prompt=object_prompt,
+                query=query,
+                debug_raw=debug_raw,
+                debug_pick_place=debug_pick_place,
+                depth_median_n=depth_median_n,
+                center_region_ratio=center_region_ratio,
+                elapsed_move=0.0,
+                max_move_duration=max_move_duration,
+            )
+        else:
+            found, arm_used = False, None
+        if found:
+            return ShelfSearchResult(
+                success=True,
+                remaining_move_duration=max_move_duration,
+                layer_index=layer_index,
+                arm_used=arm_used,
+            )
 
         while True:
             # Snake scan: odd layer left->right (+v), even layer right->left (-v).
             curr_vy = v if (layer_index % 2 == 1) else -v
-            layer_hit = _scan_direction(
+            scan_result = _scan_direction(
                 arx,
                 object_prompt,
                 vy=curr_vy,
@@ -418,31 +421,61 @@ def search_shelf(
                 max_move_duration=max_move_duration,
                 check_interval=check_interval,
             )
-            if layer_hit:
-                return True
+            if scan_result.success:
+                return ShelfSearchResult(
+                    success=True,
+                    remaining_move_duration=scan_result.remaining_move_duration,
+                    layer_index=layer_index,
+                    arm_used=scan_result.arm_used,
+                )
 
             if layer_index >= max_layer:
                 print("reached max_layer limit, stopping search")
-                return False
+                return ShelfSearchResult(
+                    success=False,
+                    remaining_move_duration=0.0,
+                    layer_index=layer_index,
+                )
 
             current_height -= drop_height
             arx.step_lift(current_height)
             layer_index += 1
 
-            if _check_target(
-                arx,
-                object_prompt,
-                obj_bool_prompt,
-                obj_point_prompt,
-                debug_raw=debug_raw,
-                debug_pick_place=debug_pick_place,
-                depth_median_n=depth_median_n,
+            query = query_target(
+                arx=arx,
+                bool_prompt=obj_bool_prompt,
+                point_prompt=obj_point_prompt,
                 center_region_ratio=center_region_ratio,
-            ):
-                return True
-    except UserAbortSearch:
+            )
+            if query.result:
+                found, arm_used = _handle_found_target(
+                    arx=arx,
+                    object_prompt=object_prompt,
+                    query=query,
+                    debug_raw=debug_raw,
+                    debug_pick_place=debug_pick_place,
+                    depth_median_n=depth_median_n,
+                    center_region_ratio=center_region_ratio,
+                    elapsed_move=0.0,
+                    max_move_duration=max_move_duration,
+                )
+            else:
+                found, arm_used = False, None
+            if found:
+                return ShelfSearchResult(
+                    success=True,
+                    remaining_move_duration=max_move_duration,
+                    layer_index=layer_index,
+                    arm_used=arm_used,
+                )
+    except UserAbortSearch as exc:
         print("search aborted by user")
-        return False
+        return ShelfSearchResult(
+            success=False,
+            remaining_move_duration=exc.remaining_move_duration,
+            layer_index=layer_index,
+            aborted=True,
+        )
     finally:
         cv2.destroyAllWindows()
 
@@ -461,22 +494,40 @@ def main() -> None:
     )
     try:
         arx.reset()
-        search_shelf(
+        v = 0.6
+        max_move_duration = 5
+        result = search_shelf(
             arx=arx,
             object_prompt="a red horse",
-            v=0.5,
+            v=v,
             check_interval=0.2,
-            max_move_duration=5,
+            max_move_duration=max_move_duration,
             drop_height=10.0,
             max_layer=3,
             center_region_ratio=0.3,
             debug_raw=True,
             debug_pick_place=True,
-            depth_median_n=10,
+            depth_median_n=5,
         )
-        # step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
-        # step_base_duration(arx, 0.8, 0.0, 0.0, duration=12)
-        # step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
+        v_continue = v if result.layer_index%2==1 else -v
+        # 回归search原位
+        step_base_duration(arx, 0.0, v_continue, 0.0, duration=result.remaining_move_duration)
+        # 顺时针旋转180度，直走，再逆时针旋转90度
+        step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=12)
+        step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
+        # 靠近桌子
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=0.5)
+        # 放置
+        single_arm_pick_place(
+            arx=arx,
+            pick_prompt="",
+            place_prompt="the center part of square plate",
+            arm_side=result.arm_used or "fit",
+            item_type="cup",
+            debug=True,
+            depth_median_n=5,
+        )
     finally:
         arx.close()
 

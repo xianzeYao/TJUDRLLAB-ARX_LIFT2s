@@ -65,9 +65,6 @@ def _vote_goal_presence(
             color,
             text_prompt=goal,
             all_prompt=prompt,
-            base_url="http://172.28.102.11:22002/v1",
-            model_name="Embodied-R1.5-SFT-0128",
-            api_key="EMPTY",
             assume_bgr=False,
             return_raw=True,
         )
@@ -215,9 +212,6 @@ def nav_to_goal(
                 color,
                 text_prompt=goal,
                 all_prompt=None,
-                base_url="http://172.28.102.11:22002/v1",
-                model_name="Embodied-R1.5-SFT-0128",
-                api_key="EMPTY",
                 assume_bgr=False,
                 return_raw=True,
             )
