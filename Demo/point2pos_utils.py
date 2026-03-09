@@ -116,6 +116,21 @@ def _pixel_to_camera_point(
     return np.array([x_cam, y_cam, z, 1.0], dtype=np.float64)
 
 
+def _normalize_center_offset(
+    offset: np.ndarray | Tuple[float, ...] | List[float] | None,
+) -> np.ndarray:
+    if offset is None:
+        return BIAS_REF2CAM.astype(np.float64, copy=True)
+
+    offset_arr = np.asarray(offset, dtype=np.float64)
+    if offset_arr.shape == (3,):
+        return np.concatenate([offset_arr, [0.0]])
+    if offset_arr.shape == (4,):
+        return offset_arr
+    raise ValueError(
+        f"offset shape must be (3,) or (4,), got {offset_arr.shape}")
+
+
 def pixel_to_ref_point(
     pixel: Tuple[int, int],
     depth_image: np.ndarray,
@@ -165,11 +180,12 @@ def pixel_to_base_point(
     pixel: Tuple[int, int],
     depth_image: np.ndarray,
     robot_part: Literal["center", "left", "right"] = "center",
+    offset: np.ndarray | Tuple[float, ...] | List[float] | None = None,
     K: np.ndarray | None = None,
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray:
-    """像素 + 深度 -> 机器人工作坐标系 3D 点。"""
+    """像素 + 深度 -> 机器人工作坐标系 3D 点。offset 即 center 使用的 BIAS_REF2CAM。"""
     if K is None:
         K = load_intrinsics()
     cam_point = _pixel_to_camera_point(pixel, depth_image, K)
@@ -182,7 +198,7 @@ def pixel_to_base_point(
         T_cam2ref = T_left if T_left is not None else load_cam2ref(side="left")
         ref_point = T_cam2ref @ cam_point
         if robot_part == "center":
-            ref_point = ref_point + BIAS_REF2CAM
+            ref_point = ref_point + _normalize_center_offset(offset)
         elif robot_part != "left":
             raise ValueError(
                 f"robot_part must be center/left/right, got {robot_part!r}")
@@ -194,16 +210,18 @@ def pixel_to_base_point_safe(
     pixel: Tuple[int, int],
     depth_image: np.ndarray,
     robot_part: Literal["center", "left", "right"] = "center",
+    offset: np.ndarray | Tuple[float, ...] | List[float] | None = None,
     K: np.ndarray | None = None,
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray | None:
-    """像素 + 深度 -> base 3D 点。深度无效则返回 None。"""
+    """像素 + 深度 -> base 3D 点。offset 即 center 使用的 BIAS_REF2CAM。"""
     try:
         return pixel_to_base_point(
             pixel,
             depth_image,
             robot_part=robot_part,
+            offset=offset,
             K=K,
             T_left=T_left,
             T_right=T_right,

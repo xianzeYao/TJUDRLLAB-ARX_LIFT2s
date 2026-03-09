@@ -79,7 +79,8 @@ def _vote_goal_presence(
 def _select_goal_point(points, depth):
     valid_goals = []
     for point in points:
-        goal_pw = pixel_to_base_point_safe(point, depth, robot_part="center")
+        goal_pw = pixel_to_base_point_safe(
+            point, depth, robot_part="center", offset=[0.0, 0.5, 0.0])
         if goal_pw is None:
             u, v = int(round(point[0])), int(round(point[1]))
             print(f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新")

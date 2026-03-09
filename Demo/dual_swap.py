@@ -40,23 +40,23 @@ def _restore_keyboard(old_settings):
 
 def pick_tools(arx: ARXRobotEnv) -> None:
     open_action = {
-        "left": np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
-        "right": np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
+        "left": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
+        "right": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
     }
     arx.step(open_action)
     print("请放取扫把簸箕，5秒后开始夹取...")
     time.sleep(5.0)
 
     close_action = {
-        "left": np.array([0, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
-        "right": np.array([0, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
+        "left": np.array([0.05, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
+        "right": np.array([0.05, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
     }
     arx.step(close_action)
     time.sleep(5.0)
 
     lift_action = {
-        "left": np.array([0, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
-        "right": np.array([0, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
+        "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
+        "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
     }
     arx.step(lift_action)
     time.sleep(1.0)

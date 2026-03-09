@@ -57,8 +57,8 @@ def nav_dual_sweep(
                 print("Stop signal received.")
                 return
             lift_action = {
-                "left": np.array([0, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
-                "right": np.array([0, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
+                "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
+                "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
             }
             arx.step(lift_action)
             nav_result = nav_to_goal(
@@ -111,8 +111,8 @@ def main():
         arx.reset()
         nav_dual_sweep(
             arx,
-            goal="white paper balls on the floor",
-            distance=0.57,
+            goal="paper cup on the floor",
+            distance=0.6,
             nav_debug_raw=True,
             swap_debug_raw=True,
             nav_depth_median_n=2,

@@ -369,7 +369,7 @@ def search_shelf(
         raise ValueError("max_move_duration must be > 0")
     if check_interval < 0:
         raise ValueError("check_interval must be >= 0")
-    start_height = 20.0
+    start_height = 13.0
 
     try:
         arx.step_lift(start_height)
@@ -499,12 +499,12 @@ def main() -> None:
         max_move_duration = 8
         result = search_shelf(
             arx=arx,
-            object_prompt="a tennis ball",
+            object_prompt="a yellow glue",
             v=v,
             check_interval=0.2,
             max_move_duration=max_move_duration,
-            drop_height=10.0,
-            max_layer=3,
+            drop_height=13.0,
+            max_layer=2,
             center_region_ratio=0.3,
             debug_raw=False,
             debug_pick_place=False,
