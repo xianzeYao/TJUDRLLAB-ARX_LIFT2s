@@ -176,7 +176,7 @@ def nav_to_goal(
     last_result = None
 
     try:
-        arx.step_lift(12.0)
+        arx.step_lift(5.0)
         while True:
             key = _get_key_nonblock()
             if key == "q":

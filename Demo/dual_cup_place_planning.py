@@ -54,14 +54,20 @@ def _arm_for_cycle(cycle_idx: int) -> str:
 
 def _place_height(place_idx: int) -> float:
     if place_idx < 3:
-        return 13.5
+        return 15
     if place_idx < 5:
-        return 17.5
+        return 18
     return 20.0
 
 
 def _is_combined_stage(cycle_idx: int) -> bool:
     return cycle_idx < 3
+
+
+def _arm_home_action(arm: str, open_gripper: bool = True) -> dict[str, np.ndarray]:
+    gripper = -3.4 if open_gripper else 0.0
+    active = np.array([0, 0, 0, 0, 0, 0, gripper], dtype=np.float32)
+    return {"left": active} if arm == "left" else {"right": active}
 
 
 def _desc_prompt(arm: str) -> str:
@@ -484,12 +490,12 @@ def dual_cup_place_planning(
                 arx.step_lift(_place_height(cycle_idx))
                 if _place_height(cycle_idx) > 13.5:
                     time.sleep(1.0)
-                if cycle_idx == 0:
-                    print(f"cycle_idx: {cycle_idx}:y减2cm")
-                    place_ref[1] -= 0.02
-                if cycle_idx == 1:
-                    place_ref[1] += 0.02
-                    print(f"cycle_idx: {cycle_idx}:y加2cm")
+                # if cycle_idx == 0:
+                #     print(f"cycle_idx: {cycle_idx}:y减2cm")
+                #     place_ref[1] -= 0.02
+                # if cycle_idx == 1:
+                #     place_ref[1] += 0.02
+                #     print(f"cycle_idx: {cycle_idx}:y加2cm")
                 execute_pick_place_cup_sequence(
                     arx=arx,
                     pick_ref=None,
@@ -498,6 +504,7 @@ def dual_cup_place_planning(
                     do_pick=False,
                     do_place=True,
                 )
+                arx.step(_arm_home_action(arm, open_gripper=True))
                 cycle_idx += 1
                 reset_pick_state(clear_prompt=True)
                 reset_place_state()
@@ -509,7 +516,7 @@ def dual_cup_place_planning(
                     print("当前未预测到 pick 点，按 r 重新预测。")
                     continue
                 arx.step_lift(13.5)
-                current_pick_ref[2] += 0.015
+                # current_pick_ref[2] += 0.015
                 execute_pick_place_cup_sequence(
                     arx=arx,
                     pick_ref=current_pick_ref,
@@ -531,18 +538,18 @@ def dual_cup_place_planning(
                 arx.step_lift(_place_height(cycle_idx))
                 if _place_height(cycle_idx) > 13.5:
                     time.sleep(1.0)
-                if cycle_idx == 0:
-                    print(f"cycle_idx: {cycle_idx}:y减2cm")
-                    place_ref[1] -= 0.02
-                if cycle_idx == 1:
-                    place_ref[1] += 0.02
-                    print(f"cycle_idx: {cycle_idx}:y加2cm")
+                # if cycle_idx == 0:
+                #     print(f"cycle_idx: {cycle_idx}:y减2cm")
+                #     place_ref[1] -= 0.02
+                # if cycle_idx == 1:
+                #     place_ref[1] += 0.02
+                #     print(f"cycle_idx: {cycle_idx}:y加2cm")
                 if cycle_idx == 3:
-                    print(f"cycle_idx: {cycle_idx}:x减0.5cm")
-                    place_ref[0] -= 0.005
+                    print(f"cycle_idx: {cycle_idx}:x减1cm")
+                    place_ref[0] -= 0.01
                 if cycle_idx == 4:
-                    print(f"cycle_idx: {cycle_idx}:x减0.5cm")
-                    place_ref[0] -= 0.005
+                    print(f"cycle_idx: {cycle_idx}:x减1cm")
+                    place_ref[0] -= 0.01
                 if cycle_idx == 5:
                     print(f"cycle_idx: {cycle_idx}:x减去1cm")
                     place_ref[0] -= 0.01
@@ -554,6 +561,7 @@ def dual_cup_place_planning(
                     do_pick=False,
                     do_place=True,
                 )
+                arx.step(_arm_home_action(arm, open_gripper=True))
                 if use_queue_place:
                     if queue_place_count == 0:
                         if len(picked_queue) > 1:
@@ -591,7 +599,7 @@ def main():
     )
     try:
         arx.reset()
-        dual_cup_place_planning(arx, manual=True, depth_median_n=10)
+        dual_cup_place_planning(arx, manual=False, depth_median_n=10)
     finally:
         arx.close()
 

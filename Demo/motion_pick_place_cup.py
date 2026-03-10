@@ -4,8 +4,8 @@ from typing import Dict, Optional
 CLOSE = 0.0
 OPEN = -3.3
 GRIPPER_OFFSET = 0.15
-GRIPPER_CUP = -2.3
-# GRIPPER_CUP = -2.3 or -0.5 # for pick
+GRIPPER_CUP = -2.2
+# GRIPPER_CUP = -2.2 or -0.5 # for pick
 Z_CUP = 0.045
 CALIBRATE_OFFSET_LEFT = 0.015
 CALIBRATE_OFFSET_RIGHT = 0.01
@@ -81,7 +81,7 @@ def make_pick_back_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [(base[0] - GRIPPER_OFFSET)/4,
-         calibrate_offset, (base[2] + Z_CUP)/2, 0, 0, 0, GRIPPER_CUP],
+         calibrate_offset, (base[2] + Z_CUP)/2+0.05, 0, 0, 0, GRIPPER_CUP],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)

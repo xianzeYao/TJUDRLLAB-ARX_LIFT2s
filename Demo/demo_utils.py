@@ -81,7 +81,7 @@ def do_replan(
     color_img: np.ndarray,
     planning_prompt: str,
     max_retries: int = 5,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[str], Optional[str]]:
     last_text: Optional[str] = None
     for _ in range(max_retries):
         raw_result = predict_multi_points_from_rgb(
@@ -90,7 +90,7 @@ def do_replan(
             all_prompt=planning_prompt,
             assume_bgr=False,
             return_raw=True,
-            temperature=0.0,
+            temperature=0.7,
         )
         if isinstance(raw_result, tuple):
             _, pick_answer_text = raw_result
@@ -100,7 +100,7 @@ def do_replan(
         last_text = pick_answer_text
         pick_plan, cups = extract_numbered_sentences(pick_answer_text)
         if pick_plan:
-            return pick_plan, cups
+            return pick_plan, cups, pick_answer_text
 
     raise RuntimeError(
         f"failed to parse planning result after {max_retries} retries: {last_text!r}")

@@ -112,7 +112,7 @@ def main():
         nav_dual_sweep(
             arx,
             goal="paper cup on the floor",
-            distance=0.6,
+            distance=0.51,
             nav_debug_raw=True,
             swap_debug_raw=True,
             nav_depth_median_n=2,

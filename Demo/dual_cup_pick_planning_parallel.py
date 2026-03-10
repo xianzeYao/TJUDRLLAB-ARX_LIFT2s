@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 import textwrap
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -59,6 +60,25 @@ def _build_multi_prompt(
 
 def _decode_points(points: List[Tuple[float, float]]) -> List[Tuple[int, int]]:
     return [(int(round(u)), int(round(v))) for (u, v) in points]
+
+
+def _extract_unique_cup_steps(
+    plan_steps: List[str],
+    goal: str,
+    max_steps: int = 4,
+) -> List[str]:
+    unique_cups: List[str] = []
+    seen = set()
+    text = " ".join([*plan_steps, goal])
+    for match in re.finditer(r"\b([A-Za-z]+)\s+cup\b", text, flags=re.IGNORECASE):
+        cup = match.group(0).strip()
+        key = cup.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_cups.append(cup)
+
+    return unique_cups[:max_steps]
 
 
 def _build_single_prompts(
@@ -120,17 +140,34 @@ def _save_points_vis(vis_img: np.ndarray, save_path: str) -> None:
     print(f"预测点位图已保存: {out}")
 
 
-def _build_planning_prompt(goal_cup: str) -> str:
-    # return (
-    #     f"Current Goal is: pick the {goal_cup}. "
-    #         "I need to pick up the cups from top to the goal cup."
-    #         "What is the picking plan steps to finish the goal?"
-    # )
-    return (
-        f"Current Goal is: pick the {goal_cup}. "
-        "I need to pick up the cups from top to the goal cup."
-        "What is the picking plan with minimal steps to finish the goal?"
-    )
+def _build_planning_prompt(goal_cup: str, prompt_idx: int = 0) -> str:
+    prompts = [
+        (
+            f"Current Goal is: pick the {goal_cup}. "
+            "I need to pick up the cups from top to the goal cup."
+            "What is the picking plan steps to finish the goal?"
+        ),
+        (
+            f"Current Goal is: pick the {goal_cup}. "
+            f"Start from the toppest cup and trace downward to identify the blocking cups up to the {goal_cup}."
+            "What cups are the blocking cups in the plan?"
+        ),
+    ]
+    # prompts = [(f"""Given an RGB image, output the minimal sequence of cup pick actions required to finally pick the {goal_cup}
+    #                     Rules:
+    #                     - A cup can only be picked if no other cup is placed on top of it.
+    #                     - A cup that is partially or fully occluded by another cup is NOT pickable.
+    #                     - If the goal cup is not immediately pickable, you must first pick the cups that block it.
+    #                     - The order of pick actions is the actual execution order.
+    #                     For each pick action, provide the color of the cup like :red cup."""),
+    #            (f"""Given an RGB image, output the minimal sequence of cup pick actions required to finally pick the {goal_cup}
+    #                     Rules:
+    #                     - A cup can only be picked if no other cup is placed on top of it.
+    #                     - A cup that is partially or fully occluded by another cup is NOT pickable.
+    #                     - If the goal cup is not immediately pickable, you must first pick the cups that block it.
+    #                     - The order of pick actions is the actual execution order.
+    #                     For each pick action, provide the color of cup.like :red cup.""")]
+    return prompts[prompt_idx % len(prompts)]
 
 
 def dual_arm_pick_planning_parallel(
@@ -152,23 +189,35 @@ def dual_arm_pick_planning_parallel(
         plan_cups: List[str] = []
 
         goal_cup = goal
-        planning_prompt = _build_planning_prompt(goal_cup)
+        plan_attempt_idx = 0
+        planning_prompt = _build_planning_prompt(goal_cup, plan_attempt_idx)
         confirm_win = "Planning Step"
         if debug_raw:
             cv2.namedWindow(confirm_win, cv2.WINDOW_NORMAL)
 
         while True:
+            planning_prompt = _build_planning_prompt(
+                goal_cup, plan_attempt_idx)
             frames = arx.get_camera(
                 target_size=(640, 480), return_status=False)
             color = frames.get("camera_h_color")
             if color is None:
                 continue
-            current_plan, current_cups = do_replan(color, planning_prompt)
+            current_plan, current_cups, current_raw_plan = do_replan(
+                color, planning_prompt
+            )
             if not debug_raw:
                 if not current_plan:
                     continue
-                plan_steps = current_plan[:4]
-                plan_cups = current_cups[:4] if current_cups else []
+                print("规划原始输出:")
+                print(current_raw_plan if current_raw_plan else "<empty>")
+                plan_steps = _extract_unique_cup_steps(
+                    current_plan, goal=goal_cup)
+                plan_cups = plan_steps[:]
+                if not plan_steps:
+                    print("未提取到有效 cup 步骤，重新规划。")
+                    plan_attempt_idx += 1
+                    continue
                 print("规划已自动确认，进入执行模式。")
                 break
 
@@ -183,6 +232,8 @@ def dual_arm_pick_planning_parallel(
                 scale=0.5,
                 thickness=2,
             )
+            print("规划原始输出:")
+            print(current_raw_plan if current_raw_plan else "<empty>")
             print(f"生成的规划结果 ({len(current_plan)} 步):")
             if not current_plan:
                 print("未生成有效步骤！")
@@ -193,18 +244,26 @@ def dual_arm_pick_planning_parallel(
             print("按'y' 确认, 'r' 重试, 'p' 更新目标, 'q' 退出")
             key = cv2.waitKey(0)
             if key == ord("y") and current_plan:
-                plan_steps = current_plan[:4]
-                plan_cups = current_cups[:4] if current_cups else []
+                plan_steps = _extract_unique_cup_steps(
+                    current_plan, goal=goal_cup)
+                plan_cups = plan_steps[:]
+                if not plan_steps:
+                    print("未提取到有效 cup 步骤，重新规划。")
+                    plan_attempt_idx += 1
+                    continue
                 print("规划已确认，进入执行模式。")
                 break
             if key == ord("r"):
                 print("重新尝试规划...")
+                plan_attempt_idx += 1
                 continue
             if key == ord("p"):
                 new_goal = input("输入新的需求 (留空保持当前): ").strip()
                 if new_goal:
                     goal_cup = new_goal
-                    planning_prompt = _build_planning_prompt(goal_cup)
+                    plan_attempt_idx = 0
+                    planning_prompt = _build_planning_prompt(
+                        goal_cup, plan_attempt_idx)
                     print(f"新的 pick prompt 已设置为: {planning_prompt!r}")
                 continue
             if key == ord("q"):
@@ -249,7 +308,7 @@ def dual_arm_pick_planning_parallel(
                         u, v = predict_point_from_rgb(
                             color,
                             text_prompt=prompt,
-                            temperature=0.0,
+                            temperature=0.7,
                             assume_bgr=False,
                         )
                     except RuntimeError as exc:
@@ -264,7 +323,7 @@ def dual_arm_pick_planning_parallel(
                     color,
                     text_prompt="",
                     all_prompt=prompt,
-                    temperature=0.0,
+                    temperature=0.7,
                     assume_bgr=False,
                 )
                 pts = _decode_points(points)
@@ -449,7 +508,7 @@ def main():
         arx.reset()
         dual_arm_pick_planning_parallel(
             arx,
-            goal="orange cup",
+            goal="purple cup",
             no_last_place=False,
             single_test=True,
             # dir="../Video4demo/dual_cup_pick_planning_parallel_red.png",
