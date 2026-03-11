@@ -38,6 +38,48 @@ def _restore_keyboard(old_settings):
     termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
 
+def _confirm_continue_swap(sweep_idx: int, max_sweeps: int) -> bool:
+    win = "dual_swap_confirm"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    prompt = "Continue sweep or not?"
+    try:
+        while True:
+            panel = np.zeros((120, 900, 3), dtype=np.uint8)
+            cv2.putText(
+                panel,
+                prompt,
+                (20, 55),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+            )
+            cv2.putText(
+                panel,
+                "y: continue   n: stop",
+                (20, 95),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+            )
+            cv2.imshow(win, panel)
+
+            key = _get_key_nonblock()
+            if key in ("y", "Y"):
+                return True
+            if key in ("n", "N"):
+                return False
+
+            cv_key = cv2.waitKey(50) & 0xFF
+            if cv_key in (ord("y"), ord("Y")):
+                return True
+            if cv_key in (ord("n"), ord("N"), 27):
+                return False
+    finally:
+        cv2.destroyWindow(win)
+
+
 def pick_tools(arx: ARXRobotEnv) -> None:
     open_action = {
         "left": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
@@ -145,8 +187,22 @@ def dual_swap(
             return None
 
         swap_seq = build_swap_sequence(target_base_point)
-        for action in swap_seq:
-            arx.step(action)
+        if not swap_seq:
+            return target_base_point
+
+        arx.step(swap_seq[0])
+        sweep_actions = swap_seq[1:]
+        actions_per_sweep = 4
+        max_sweeps = len(sweep_actions) // actions_per_sweep
+        for sweep_idx in range(max_sweeps):
+            start = sweep_idx * actions_per_sweep
+            end = start + actions_per_sweep
+            for action in sweep_actions[start:end]:
+                arx.step(action)
+            if sweep_idx == max_sweeps - 1:
+                break
+            if not _confirm_continue_swap(sweep_idx + 1, max_sweeps):
+                break
         return target_base_point
     finally:
         cv2.destroyAllWindows()

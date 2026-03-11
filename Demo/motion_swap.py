@@ -62,7 +62,7 @@ def build_swap_sequence(pt_ref: Optional[np.ndarray]):
     """返回动作序列，不执行。"""
     result = []
     result.append(make_swap_move_action(pt_ref))
-    for _ in range(3):
+    for _ in range(5):
         result.append(make_swap_left_action(pt_ref))
         result.append(make_swap_lift_action(pt_ref))
         result.append(make_swap_right_action(pt_ref))

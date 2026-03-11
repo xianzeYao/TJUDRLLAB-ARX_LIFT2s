@@ -17,7 +17,7 @@ from demo_utils import step_base_duration
 from nav_utils import path_to_actions
 from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
 
-BASE_FORWARD_SPEED = 0.06
+BASE_FORWARD_SPEED = 0.125
 BASE_ROTATE_SPEED = math.pi / 20.6
 
 
@@ -156,7 +156,7 @@ def _execute_nav_actions(
                 continue
             step_base_duration(
                 arx,
-                vx=0.5,
+                vx=0.75,
                 vy=0.0,
                 vz=0.0,
                 duration=float(remaining / BASE_FORWARD_SPEED),

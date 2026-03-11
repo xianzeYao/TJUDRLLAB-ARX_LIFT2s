@@ -111,7 +111,7 @@ def main():
         arx.reset()
         nav_dual_sweep(
             arx,
-            goal="paper cup on the floor",
+            goal="paper cup or paper ball or bottle on the floor",
             distance=0.51,
             nav_debug_raw=True,
             swap_debug_raw=True,
