@@ -64,10 +64,13 @@ def _is_combined_stage(cycle_idx: int) -> bool:
     return cycle_idx < 3
 
 
-def _arm_home_action(arm: str, open_gripper: bool = True) -> dict[str, np.ndarray]:
-    gripper = -3.4 if open_gripper else 0.0
-    active = np.array([0, 0, 0, 0, 0, 0, gripper], dtype=np.float32)
-    return {"left": active} if arm == "left" else {"right": active}
+def _home_arm(arx: ARXRobotEnv, arm: str, open_gripper: bool = True) -> None:
+    success, error_message = arx.set_special_mode(1, side=arm)
+    if not success:
+        raise RuntimeError(f"Failed to home {arm} arm: {error_message}")
+    if open_gripper:
+        home_open = np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32)
+        arx.step_raw_eef({arm: home_open})
 
 
 def _desc_prompt(arm: str) -> str:
@@ -504,7 +507,7 @@ def dual_cup_place_planning(
                     do_pick=False,
                     do_place=True,
                 )
-                arx.step(_arm_home_action(arm, open_gripper=True))
+                _home_arm(arx, arm, open_gripper=True)
                 cycle_idx += 1
                 reset_pick_state(clear_prompt=True)
                 reset_place_state()
@@ -561,7 +564,7 @@ def dual_cup_place_planning(
                     do_pick=False,
                     do_place=True,
                 )
-                arx.step(_arm_home_action(arm, open_gripper=True))
+                _home_arm(arx, arm, open_gripper=True)
                 if use_queue_place:
                     if queue_place_count == 0:
                         if len(picked_queue) > 1:

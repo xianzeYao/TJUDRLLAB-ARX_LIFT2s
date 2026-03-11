@@ -105,11 +105,9 @@ def pick_tools(arx: ARXRobotEnv) -> None:
 
 
 def release_tools(arx: ARXRobotEnv) -> None:
-    home_action = {
-        "left": np.array([0, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
-        "right": np.array([0, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
-    }
-    arx.step(home_action)
+    success, error_message = arx.set_special_mode(1)
+    if not success:
+        raise RuntimeError(f"Failed to home both arms: {error_message}")
     time.sleep(1.0)
 
     open_action = {

@@ -13,10 +13,9 @@ CLOSE = -2.2
 
 def special_give(arx: ARXRobotEnv, cup_side: str):
     straw_side = "right" if cup_side == "left" else "left"
-    # 拿吸管的手回到初始位姿
-    one_arm_home_action = {straw_side: np.array(
-        [0, 0, 0, 0, 0, 0, 0], dtype=np.float32)}
-    arx.step(one_arm_home_action)
+    success, error_message = arx.set_special_mode(1, side=straw_side)
+    if not success:
+        raise RuntimeError(f"Failed to home {straw_side} arm: {error_message}")
     step_base_duration(arx, vx=0.5, vy=0.0, vz=-0.0, duration=2.0)
     # 往前递杯子
     if cup_side == "left":
