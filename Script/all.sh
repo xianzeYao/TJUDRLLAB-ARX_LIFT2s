@@ -36,33 +36,33 @@ gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   depth_module.enable_auto_exposure:=true\
   rgb_camera.enable_auto_exposure:=true;exec bash;"
 
-# # camera_l
-# gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
-#   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
-#   align_depth.enable:=true \
-#   pointcloud.enable:=true\
-#   publish_tf:=true \
-#   tf_publish_rate:=50.0 \
-#   camera_name:=camera_l \
-#   camera_namespace:=camera_l_namespace \
-#   serial_no:=_409122272587 \
-#   depth_module.color_profile:=640x480x60 \
-#   depth_module.depth_profile:=640x480x60\
-#   depth_module.enable_auto_exposure:=true\
-#   rgb_camera.enable_auto_exposure:=true; exec bash;"
+# camera_l
+gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
+  source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
+  align_depth.enable:=true \
+  pointcloud.enable:=true\
+  publish_tf:=true \
+  tf_publish_rate:=50.0 \
+  camera_name:=camera_l \
+  camera_namespace:=camera_l_namespace \
+  serial_no:=_409122272587 \
+  depth_module.color_profile:=640x480x60 \
+  depth_module.depth_profile:=640x480x60\
+  depth_module.enable_auto_exposure:=true\
+  rgb_camera.enable_auto_exposure:=true; exec bash;"
 
 
-# # camera_r
-# gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
-#   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
-#   align_depth.enable:=true \
-#   pointcloud.enable:=true\
-#   publish_tf:=true \
-#   tf_publish_rate:=50.0 \
-#   camera_name:=camera_r \
-#   camera_namespace:=camera_r_namespace \
-#   serial_no:=_409122272707 \
-#   depth_module.color_profile:=640x480x60 \
-#   depth_module.depth_profile:=640x480x60\
-#   depth_module.enable_auto_exposure:=true\
-#   rgb_camera.enable_auto_exposure:=true; exec bash;"
+# camera_r
+gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
+  source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
+  align_depth.enable:=true \
+  pointcloud.enable:=true\
+  publish_tf:=true \
+  tf_publish_rate:=50.0 \
+  camera_name:=camera_r \
+  camera_namespace:=camera_r_namespace \
+  serial_no:=_409122272707 \
+  depth_module.color_profile:=640x480x60 \
+  depth_module.depth_profile:=640x480x60\
+  depth_module.enable_auto_exposure:=true\
+  rgb_camera.enable_auto_exposure:=true; exec bash;"
