@@ -40,158 +40,10 @@ class ARXRobotEnv():
         self.max_a_xyz = max_a_xyz
         self.max_a_rpy = max_a_rpy
 
-        # 1. Enable the robot
+        # Enable the robot
         success, error_message = self._enable_robot()
         if not success:
             raise RuntimeError(f"Failed to enable the robot: {error_message}")
-
-    def reset(self) -> Dict[str, np.ndarray]:
-        """
-        Resets the robot to the initial pose.
-
-        Returns:
-            observation (Dict[str, np.ndarray]): The initial state of the robot.
-        """
-        time.sleep(2.5)
-        # 1. Go to the initial pose
-        success, error_message = self._go_to_initial_pose()
-        if not success:
-            raise RuntimeError(
-                f"Failed to go to the initial pose: {error_message}")
-
-        # 2. Stop the base and lift the base to a safe height
-        self.step_lift(0.0)
-        self.step_base(0.0, 0.0, 0.0)
-
-        # 3. Get the initial observation
-        obs = self.get_observation()
-
-        return obs
-
-    def step_lift(self, height: float):
-        """Adjust base hight"""
-        success, error = self._apply_lift(height)
-        if not success:
-            raise RuntimeError(f"Failed to lift base: {error}")
-        print(f"lift to height {height} done")
-
-    def step_base(self, vx: float, vy: float, vz: float):
-        """Publish one base command and return immediately."""
-        success, error = self._apply_base(vx, vy, vz)
-        if not success:
-            raise RuntimeError(f"Failed to send base command: {error}")
-
-    def step(self, action: np.ndarray):
-        """
-        Execute one time step in the environment.
-
-        Args:
-            action (np.ndarray): Action provided by the agent. Shape (action_dim,).
-
-        Returns:
-            observation (np.ndarray): New state of the robot.
-            reward (float): Scalar reward value.
-            done (bool): Whether the episode has ended.
-            info (dict): Diagnostic information.
-        """
-
-        # 1. Apply action
-        success, error_message = self._apply_action(action)
-        if not success:
-            self.close()
-            raise RuntimeError(f"Failed to apply action: {error_message}")
-
-        # 2. State Observation
-        # Retrieve latest data from ROS topics
-        obs = self.get_observation()
-
-        reward = 0.0
-        is_done = False
-        info = dict()
-        # 3. Reward Calculation
-        # reward = self._get_reward(obs, action)
-
-        # 4. Termination Logic
-        # is_done = self._get_termination(obs, action)
-
-        # info = self._get_info()
-
-        return obs, reward, is_done, info
-
-    def get_observation(self, save_dir: Optional[str] = None,
-                        video: Optional[bool] = None,
-                        include_arm: bool = True,
-                        include_camera: bool = True,
-                        include_base: bool = True) -> Dict[str, np.ndarray]:
-        """
-        Fetch latest status/camera and pack into observation.
-
-        save_dir: 默认 None 时沿用实例化时的 self.dir；显式传值覆盖；传入空串/False 可关闭保存。
-        video: 默认 None 时沿用实例化时的 self.video；True 保存视频，False 保存图片。
-        """
-        camera_all, status_all = self.get_camera(
-            save_dir=save_dir,
-            video=video,
-            target_size=self.img_size,
-            return_status=True,
-        )
-        obs = build_observation(
-            camera_all, status_all,
-            include_arm=include_arm,
-            include_camera=include_camera,
-            include_base=include_base,
-        )
-        if not obs:
-            try:
-                self.close()
-            except Exception:
-                pass
-            raise RuntimeError("Empty observation, node shutdown.")
-        return obs
-
-    def get_camera(self,
-                   save_dir: Optional[str] = None,
-                   video: Optional[bool] = None,
-                   target_size: Optional[Tuple[int, int]] = None,
-                   return_status: bool = False):
-        """
-        环境层统一相机入口。
-
-        业务代码优先通过 env.get_camera()/env.get_observation() 取数据，
-        不要直接下钻到 env.node.get_camera()。
-        """
-        real_save_dir = self.dir if save_dir is None else save_dir
-        real_video = self.video if video is None else video
-        real_target_size = self.img_size if target_size is None else target_size
-        return self.node.get_camera(
-            save_dir=real_save_dir,
-            target_size=real_target_size,
-            save_video=real_video,
-            return_status=return_status,
-        )
-
-    def get_robot_status(self):
-        """环境层统一状态入口，屏蔽底层 node 接口。"""
-        return self.node.get_robot_status()
-
-    def close(self):
-        """
-        Clean up resources and shut down ROS nodes.
-        """
-
-        # 1. Stop the base and make both arms go to initial pose and set height to 0
-        self.step_base(0.0, 0.0, 0.0)
-        time.sleep(1.0)
-        success, error_message = self._go_to_initial_pose()
-        self.step_lift(0.0)
-        if not success:
-            raise RuntimeError(
-                f"Failed to go to the initial pose: {error_message}")
-
-        # 2. Disable the robot
-        success, error_message = self._disable_robot()
-        if not success:
-            raise RuntimeError(f"Failed to disable the robot: {error_message}")
 
     # ----------------- Private helpers -----------------
 
@@ -280,32 +132,146 @@ class ARXRobotEnv():
                 time.sleep(sleep_need)
         return (True, None)
 
-    def _go_to_initial_pose(self) -> Tuple[bool, str | None]:
-        """Move arms to initial pose."""
-        home_action = {
-            "left": np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32),
-            "right": np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32),
+    def _step_with_apply(
+        self,
+        action: Dict[str, np.ndarray],
+        apply_fn,
+        error_prefix: str,
+        return_observation: bool = False,
+    ):
+        success, error_message = apply_fn(action)
+        if not success:
+            self.close()
+            raise RuntimeError(f"{error_prefix}: {error_message}")
+        if return_observation:
+            return self.get_observation()
+        return None
 
-        }
+    @staticmethod
+    def _normalize_dual_arm_action(action: Dict[str, np.ndarray], dim: int, label: str) -> Tuple[bool, Dict[str, np.ndarray] | str]:
+        if not isinstance(action, dict):
+            return (False, f"{label} action must be a dict with left/right keys")
+        normalized: Dict[str, np.ndarray] = {}
+        for side in ("left", "right"):
+            target = action.get(side)
+            if target is None:
+                continue
+            array = np.asarray(target, dtype=np.float32).reshape(-1)
+            if array.shape[0] != dim:
+                return (False, f"{label} {side} target must have shape ({dim},), got {array.shape}")
+            normalized[side] = array
+        if not normalized:
+            return (False, f"{label} action is empty")
+        return (True, normalized)
+
+    def _apply_raw_eef(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
+        ok, payload = self._normalize_dual_arm_action(action, 7, "raw_eef")
+        if not ok:
+            return (False, payload)
+        for side, target in payload.items():
+            msg = RobotCmd()
+            msg.mode = 4
+            msg.end_pos = [float(x) for x in target[:6]]
+            msg.gripper = float(target[6])
+            if not self.node.send_control_msg(side, msg):
+                return (False, f"{side}: command not sent")
+        return (True, None)
+
+    def _apply_raw_joint(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
+        ok, payload = self._normalize_dual_arm_action(action, 7, "raw_joint")
+        if not ok:
+            return (False, payload)
+        for side, target in payload.items():
+            msg = RobotCmd()
+            msg.mode = 5
+            msg.joint_pos = [float(x) for x in target[:6]]
+            msg.gripper = float(target[6])
+            if not self.node.send_control_msg(side, msg):
+                return (False, f"{side}: command not sent")
+        return (True, None)
+
+    def _apply_delta_eef(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
+        ok, payload = self._normalize_dual_arm_action(action, 7, "delta_eef")
+        if not ok:
+            return (False, payload)
+        curr_obs = self.get_observation(
+            include_camera=False, include_base=False)
+        target_action: Dict[str, np.ndarray] = {}
+        for side, delta in payload.items():
+            curr_end = curr_obs.get(f"{side}_end_pos")
+            curr_joint = curr_obs.get(f"{side}_joint_pos")
+            if curr_end is None or curr_joint is None:
+                return (False, f"{side}: current observation unavailable")
+            curr_end = np.asarray(curr_end, dtype=np.float32).reshape(-1)
+            curr_joint = np.asarray(curr_joint, dtype=np.float32).reshape(-1)
+            if curr_end.shape[0] < 6 or curr_joint.shape[0] < 7:
+                return (False, f"{side}: malformed current observation")
+
+            target_xyz = curr_end[:3] + delta[:3]
+            q_curr = _quat_from_rpy(curr_end[3:6])
+            q_delta = _quat_from_rpy(delta[3:6])
+            q_target = _quat_multiply(q_delta, q_curr)
+            target_rpy = _rpy_from_quat(q_target)
+            target_gripper = float(curr_joint[6] + delta[6])
+            target_action[side] = np.concatenate(
+                [target_xyz, target_rpy, [target_gripper]]).astype(np.float32)
+        return self._apply_raw_eef(target_action)
+
+    def _apply_delta_joint(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
+        ok, payload = self._normalize_dual_arm_action(action, 7, "delta_joint")
+        if not ok:
+            return (False, payload)
+        curr_obs = self.get_observation(
+            include_camera=False, include_base=False)
+        target_action: Dict[str, np.ndarray] = {}
+        for side, delta in payload.items():
+            curr_joint = curr_obs.get(f"{side}_joint_pos")
+            if curr_joint is None:
+                return (False, f"{side}: current joint observation unavailable")
+            curr_joint = np.asarray(curr_joint, dtype=np.float32).reshape(-1)
+            if curr_joint.shape[0] < 7:
+                return (False, f"{side}: malformed current joint observation")
+            target_action[side] = (curr_joint[:7] + delta).astype(np.float32)
+        return self._apply_raw_joint(target_action)
+
+    def _go_to_initial_pose(self, side: Literal["left", "right", "both"] = "both") -> Tuple[bool, str | None]:
+        """Move one arm or both arms to the initial pose."""
+        home_target = np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+        if side == "both":
+            home_action = {
+                "left": home_target.copy(),
+                "right": home_target.copy(),
+            }
+        elif side in {"left", "right"}:
+            home_action = {side: home_target.copy()}
+        else:
+            return (False, f"invalid side: {side}")
         success, error_message = self._apply_action(home_action)
         if not success:
             print(
                 f"failed to go home: {error_message}, force switch to home mode")
-            self.set_special_mode(1)
+            fallback_targets = ("left", "right") if side == "both" else (side,)
+            fallback_success, fallback_error = self._send_special_mode(
+                1, fallback_targets)
+            if not fallback_success:
+                return (False, fallback_error or f"failed to go home: {error_message}")
             return (False, f"failed to go home: {error_message}")
         else:
-            print(f"both arms homed")
+            if side == "both":
+                print("both arms homed")
+            else:
+                print(f"{side} arm homed")
         return (True, None)
 
-    def set_special_mode(self, mode: int) -> Tuple[bool, str | None]:
-        """Set special mode, e.g. gravity."""
-        mode_type = {0: "soft", 1: "home", 2: "protect", 3: "gravity"}
+    def _send_special_mode(self, mode: int, targets: Tuple[str, ...]) -> Tuple[bool, str | None]:
         cmd = RobotCmd()
-        cmd.mode = mode
-        # 0-soft,1-home,2-protect,3-gravity
-        self.node.send_control_msg("left", cmd)
-        self.node.send_control_msg("right", cmd)
-        print(f"set mode for both arms {mode_type.get(mode, 'unknown')} done")
+        cmd.mode = int(mode)
+        failed = []
+        for target in targets:
+            if not self.node.send_control_msg(target, cmd):
+                failed.append(target)
+        if failed:
+            return (False, f"failed to set mode {mode} for: {', '.join(failed)}")
         return (True, None)
 
     def _setup_space(self):
@@ -317,7 +283,14 @@ class ARXRobotEnv():
         rclpy.init()
 
         self.node, self.executor, self.executor_thread = start_robot_io(
-            self.camera_type, self.camera_view, self.video, self.video_fps, self.dir, self.img_size, self.video_name)
+            self.camera_type,
+            self.camera_view,
+            self.video,
+            self.video_fps,
+            self.dir,
+            self.img_size,
+            self.video_name,
+        )
         if self.node and self.executor:
             return (True, None)
         erorr = []
@@ -358,6 +331,277 @@ class ARXRobotEnv():
         if rclpy.ok():
             erorr.append("ROS2 shutdown failed")
         return (False, "reason: ".join(erorr) if erorr else "other error")
+
+    # ----------------- Public API -----------------
+
+    def reset(self) -> Dict[str, np.ndarray]:
+        """
+        Resets the robot to the initial pose.
+
+        Returns:
+            observation (Dict[str, np.ndarray]): The initial state of the robot.
+        """
+        time.sleep(2.5)
+        success, error_message = self._go_to_initial_pose()
+        if not success:
+            raise RuntimeError(
+                f"Failed to go to the initial pose: {error_message}")
+
+        self.step_lift(0.0)
+        self.step_base(0.0, 0.0, 0.0)
+        obs = self.get_observation()
+        return obs
+
+    def step_lift(self, height: float, return_observation: bool = False):
+        """Adjust base hight"""
+        success, error = self._apply_lift(height)
+        if not success:
+            raise RuntimeError(f"Failed to lift base: {error}")
+        print(f"lift to height {height} done")
+        if return_observation:
+            return self.get_observation()
+        return None
+
+    def step_base(self, vx: float, vy: float, vz: float, return_observation: bool = False):
+        """Publish one base command and return immediately."""
+        success, error = self._apply_base(vx, vy, vz)
+        if not success:
+            raise RuntimeError(f"Failed to send base command: {error}")
+        if return_observation:
+            return self.get_observation()
+        return None
+
+    def step(self, action: np.ndarray, return_observation: bool = False):
+        """
+        Execute one time step in the environment.
+
+        Args:
+            action (np.ndarray): Action provided by the agent. Shape (action_dim,).
+        """
+        return self._step_with_apply(
+            action,
+            self._apply_action,
+            "Failed to apply action",
+            return_observation=return_observation,
+        )
+
+    def step_raw_eef(self, action: Dict[str, np.ndarray], return_observation: bool = False):
+        """Send absolute end-effector targets directly; optionally fetch one observation after the command."""
+        return self._step_with_apply(
+            action,
+            self._apply_raw_eef,
+            "Failed to apply raw EEF action",
+            return_observation=return_observation,
+        )
+
+    def step_raw_joint(self, action: Dict[str, np.ndarray], return_observation: bool = False):
+        """Send absolute joint targets directly; optionally fetch one observation after the command."""
+        return self._step_with_apply(
+            action,
+            self._apply_raw_joint,
+            "Failed to apply raw joint action",
+            return_observation=return_observation,
+        )
+
+    def step_delta_eef(self, action: Dict[str, np.ndarray], return_observation: bool = False):
+        """Apply base-frame EEF deltas on top of the latest observation."""
+        return self._step_with_apply(
+            action,
+            self._apply_delta_eef,
+            "Failed to apply delta EEF action",
+            return_observation=return_observation,
+        )
+
+    def step_delta_joint(self, action: Dict[str, np.ndarray], return_observation: bool = False):
+        """Apply joint deltas on top of the latest observation."""
+        return self._step_with_apply(
+            action,
+            self._apply_delta_joint,
+            "Failed to apply delta joint action",
+            return_observation=return_observation,
+        )
+
+    def get_observation(self, save_dir: Optional[str] = None,
+                        video: Optional[bool] = None,
+                        include_arm: bool = True,
+                        include_camera: bool = True,
+                        include_base: bool = True) -> Dict[str, np.ndarray]:
+        """
+        Fetch latest status/camera and pack them into one flat observation dict.
+
+        save_dir: 默认 None 时沿用实例化时的 self.dir；显式传值覆盖；传入空串/False 可关闭保存。
+        video: 默认 None 时沿用实例化时的 self.video；True 保存视频，False 保存图片。
+
+        Returns:
+            obs (dict[str, np.ndarray]):
+                扁平字典，常见键如下。
+
+                机械臂相关（`include_arm=True` 时，存在则写入）:
+                - `"left_end_pos"` / `"right_end_pos"`: shape `(6,)`
+                  内容为 `[x, y, z, roll, pitch, yaw]`
+                - `"left_joint_pos"` / `"right_joint_pos"`: shape `(7,)`
+                - `"left_joint_vel"` / `"right_joint_vel"`: shape `(7,)`
+                - `"left_joint_cur"` / `"right_joint_cur"`: shape `(7,)`
+
+                底盘相关（`include_base=True` 时，存在则写入）:
+                - `"base_height"`: shape `(1,)`
+                - `"base_wheel1"` / `"base_wheel2"` / `"base_wheel3"`: shape `(1,)`
+
+                相机相关（`include_camera=True` 时，按实际话题键写入）:
+                - 颜色图常见键: `"camera_h_color"`, `"camera_l_color"`, `"camera_r_color"`
+                  值通常为 `uint8`，shape `(H, W, 3)`
+                - 深度图常见键: `"camera_h_aligned_depth_to_color"` 等
+                  值通常为单通道数组，shape `(H, W)`
+
+                简单例子:
+                ```python
+                {
+                    "left_joint_pos": np.ndarray(shape=(7,), dtype=np.float32),
+                    "right_joint_pos": np.ndarray(shape=(7,), dtype=np.float32),
+                    "base_height": np.ndarray(shape=(1,), dtype=np.float32),
+                    "camera_h_color": np.ndarray(shape=(480, 640, 3), dtype=np.uint8),
+                }
+                ```
+        """
+        camera_all, status_all = self.get_camera(
+            save_dir=save_dir,
+            video=video,
+            target_size=self.img_size,
+            return_status=True,
+        )
+        obs = build_observation(
+            camera_all, status_all,
+            include_arm=include_arm,
+            include_camera=include_camera,
+            include_base=include_base,
+        )
+        if not obs:
+            try:
+                self.close()
+            except Exception:
+                pass
+            raise RuntimeError("Empty observation, node shutdown.")
+        return obs
+
+    def get_camera(self,
+                   save_dir: Optional[str] = None,
+                   video: Optional[bool] = None,
+                   target_size: Optional[Tuple[int, int]] = None,
+                   return_status: bool = False):
+        """
+        环境层统一相机入口。
+
+        业务代码优先通过 env.get_camera()/env.get_observation() 取数据，
+        不要直接下钻到 env.node.get_camera()。
+
+        Returns:
+            当 `return_status=False`:
+            - `frames: dict[str, np.ndarray]`
+              键是相机话题名，例如 `"camera_h_color"`、
+              `"camera_h_aligned_depth_to_color"`。
+              颜色图通常是 `(H, W, 3)`，深度图通常是 `(H, W)`。
+
+              简单例子:
+              ```python
+              {
+                  "camera_h_color": np.ndarray(shape=(480, 640, 3), dtype=np.uint8),
+                  "camera_h_aligned_depth_to_color": np.ndarray(shape=(480, 640), dtype=np.uint16),
+              }
+              ```
+
+            当 `return_status=True`:
+            - `(frames, status)`
+              其中 `status` 为:
+              - `"left"`: `RobotStatus | None`
+                常用字段:
+                `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+              - `"right"`: `RobotStatus | None`
+                常用字段:
+                `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+              - `"base"`: `PosCmd | None`
+                常用字段:
+                `height`, `chx`, `chy`, `chz`, `head_pit`, `head_yaw`,
+                `temp_float_data[6]`, `mode1`, `mode2`
+
+              简单例子:
+              ```python
+              frames, status = env.get_camera(return_status=True)
+              left = status["left"]     # RobotStatus or None
+              base = status["base"]     # PosCmd or None
+              # left.joint_pos -> 7 维关节位置
+              # base.height    -> 升降高度
+              ```
+        """
+        real_save_dir = self.dir if save_dir is None else save_dir
+        real_video = self.video if video is None else video
+        real_target_size = self.img_size if target_size is None else target_size
+        return self.node.get_camera(
+            save_dir=real_save_dir,
+            target_size=real_target_size,
+            save_video=real_video,
+            return_status=return_status,
+        )
+
+    def get_robot_status(self):
+        """
+        环境层统一状态入口，屏蔽底层 node 接口。
+
+        Returns:
+            status (dict[str, object | None]):
+            - `"left"`: 左臂 `RobotStatus`，拿不到时为 `None`
+              常用字段:
+              `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+            - `"right"`: 右臂 `RobotStatus`，拿不到时为 `None`
+              常用字段:
+              `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+            - `"base"`: 底盘/升降 `PosCmd` 状态，拿不到时为 `None`
+              常用字段:
+              `height`, `chx`, `chy`, `chz`, `head_pit`, `head_yaw`,
+              `temp_float_data[6]`, `mode1`, `mode2`
+
+            简单例子:
+            ```python
+            status = env.get_robot_status()
+            left = status["left"]
+            base = status["base"]
+            if left is not None:
+                print(left.joint_pos)
+            if base is not None:
+                print(base.height)
+            ```
+        """
+        return self.node.get_robot_status()
+
+    def set_special_mode(self, mode: int, side: Literal["left", "right", "both"] = "both") -> Tuple[bool, str | None]:
+        """Set special mode for one arm or both arms."""
+        mode_type = {0: "soft", 1: "home", 2: "protect", 3: "gravity"}
+        if side not in {"left", "right", "both"}:
+            return (False, f"invalid side: {side}")
+        if mode == 1:
+            return self._go_to_initial_pose(side=side)
+
+        targets = ("left", "right") if side == "both" else (side,)
+        success, error_message = self._send_special_mode(mode, targets)
+        if success:
+            print(
+                f"set mode for {side} arm(s) {mode_type.get(mode, 'unknown')} done")
+        return (success, error_message)
+
+    def close(self):
+        """
+        Clean up resources and shut down ROS nodes.
+        """
+        self.step_base(0.0, 0.0, 0.0)
+        time.sleep(1.0)
+        success, error_message = self._go_to_initial_pose()
+        self.step_lift(0.0)
+        if not success:
+            raise RuntimeError(
+                f"Failed to go to the initial pose: {error_message}")
+
+        success, error_message = self._disable_robot()
+        if not success:
+            raise RuntimeError(f"Failed to disable the robot: {error_message}")
 
 
 def main():

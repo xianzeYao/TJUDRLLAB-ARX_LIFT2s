@@ -31,7 +31,7 @@ class RobotIO(Node):
 
         self.cmd_pub_l = self.create_publisher(RobotCmd, 'arm_cmd_l', 5)
         self.cmd_pub_r = self.create_publisher(RobotCmd, 'arm_cmd_r', 5)
-        self.cmd_pub_base = self.create_publisher(PosCmd, 'ARX_VR_L', 5)
+        self.cmd_pub_base = self.create_publisher(PosCmd, '/ARX_VR_L', 5)
 
         self.latest_height = 0.0
         self.latest_status: Dict[str, Optional[RobotStatus]] = {
@@ -169,7 +169,25 @@ class RobotIO(Node):
         return True
 
     def get_robot_status(self):
-        # TODO:考虑删除此方法，直接使用 get_camera(return_status=True) 获取快照
+        """
+        Return the latest status snapshot without camera frames.
+
+        Returns:
+            status (dict[str, object | None]):
+            - `"left"`: 左臂 `RobotStatus`，拿不到时为 `None`
+              常用字段: `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+            - `"right"`: 右臂 `RobotStatus`，拿不到时为 `None`
+              常用字段: `header`, `end_pos[6]`, `joint_pos[7]`, `joint_vel[7]`, `joint_cur[7]`
+            - `"base"`: 底盘/升降 `PosCmd`，拿不到时为 `None`
+              常用字段: `height`, `chx`, `chy`, `chz`, `temp_float_data[6]`, `mode1`, `mode2`
+
+            简单例子:
+            ```python
+            status = node.get_robot_status()
+            left = status["left"]
+            base = status["base"]
+            ```
+        """
         with self.status_lock:
             status = dict(self.latest_status)
             status["base"] = self.latest_base
@@ -178,7 +196,35 @@ class RobotIO(Node):
     def get_camera(self, save_dir: Optional[str] = None, target_size: Optional[tuple[int, int]] = None,
                    save_video: Optional[bool] = None,
                    return_status: bool = False):
-        """Return latest approx-synced camera frames, optional status snapshot."""
+        """
+        Return latest approx-synced camera frames, optionally with a status snapshot.
+
+        Returns:
+            当 `return_status=False`:
+            - `frames: dict[str, np.ndarray]`
+              键通常是 `"camera_*_color"` 或 `"camera_*_aligned_depth_to_color"`。
+              例如:
+              ```python
+              {
+                  "camera_h_color": np.ndarray(shape=(480, 640, 3), dtype=np.uint8),
+                  "camera_h_aligned_depth_to_color": np.ndarray(shape=(480, 640), dtype=np.uint16),
+              }
+              ```
+
+            当 `return_status=True`:
+            - `(frames, snap)`
+              其中 `snap` 是:
+              - `"left"`: `RobotStatus | None`
+              - `"right"`: `RobotStatus | None`
+              - `"base"`: `PosCmd | None`
+
+              例如:
+              ```python
+              frames, snap = node.get_camera(return_status=True)
+              left = snap["left"]
+              base = snap["base"]
+              ```
+        """
         if self.bridge is None:
             print("CvBridge not initialized, cannot decode images.")
             return (dict(), self.status_snapshot) if return_status else dict()
@@ -366,6 +412,23 @@ def build_observation(
     Pack status和相机到扁平观测字典。
 
     include_arm / include_camera / include_base 控制是否写入对应部分，默认全开。
+
+    Returns:
+        obs (dict[str, np.ndarray]):
+        - 机械臂键:
+          `"left_end_pos"`, `"left_joint_pos"`, `"left_joint_cur"`, `"left_joint_vel"`
+          `"right_end_pos"`, `"right_joint_pos"`, `"right_joint_cur"`, `"right_joint_vel"`
+        - 底盘键:
+          `"base_height"`, `"base_wheel1"`, `"base_wheel2"`, `"base_wheel3"`
+        - 相机键:
+          直接沿用 `camera_all` 里的键，例如 `"camera_h_color"`
+
+        维度约定:
+        - `*_end_pos`: `(6,)`
+        - `*_joint_*`: `(7,)`
+        - `base_*`: `(1,)`
+        - color image: `(H, W, 3)`
+        - depth image: `(H, W)`
     """
     obs: Dict[str, np.ndarray] = {}
 
@@ -425,6 +488,23 @@ def _quat_normalize(q: np.ndarray) -> np.ndarray:
     if n <= 1e-8:
         return np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
     return (q / n).astype(np.float32)
+
+
+def _quat_multiply(q0: np.ndarray, q1: np.ndarray) -> np.ndarray:
+    """Hamilton product for quaternions stored as [x, y, z, w]."""
+    x0, y0, z0, w0 = [float(v) for v in _quat_normalize(q0)]
+    x1, y1, z1, w1 = [float(v) for v in _quat_normalize(q1)]
+    return _quat_normalize(
+        np.array(
+            [
+                w0 * x1 + x0 * w1 + y0 * z1 - z0 * y1,
+                w0 * y1 - x0 * z1 + y0 * w1 + z0 * x1,
+                w0 * z1 + x0 * y1 - y0 * x1 + z0 * w1,
+                w0 * w1 - x0 * x1 - y0 * y1 - z0 * z1,
+            ],
+            dtype=np.float32,
+        )
+    )
 
 
 def _quat_from_rpy(rpy: np.ndarray) -> np.ndarray:
