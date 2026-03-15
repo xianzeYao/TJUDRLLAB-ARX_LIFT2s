@@ -9,6 +9,7 @@ from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb
 from demo_utils import (
     draw_text_lines,
     execute_pick_place_cup_sequence,
+    execute_pick_place_deepbox_sequence,
     execute_pick_place_straw_sequence,
 )
 from point2pos_utils import (
@@ -93,7 +94,7 @@ def single_arm_pick_place(
     pick_prompt: str,
     place_prompt: str,
     arm_side: Literal["left", "right", "fit"] = "left",
-    item_type: Literal["cup", "straw"] = "cup",
+    item_type: Literal["cup", "straw", "deepbox"] = "cup",
     debug: bool = True,
     depth_median_n: int = 10,
     release_after_pick: bool = False,
@@ -197,6 +198,15 @@ def single_arm_pick_place(
                 )
             elif item_type == "straw":
                 execute_pick_place_straw_sequence(
+                    arx=arx,
+                    pick_ref=pick_ref,
+                    place_ref=place_ref,
+                    arm=arm,
+                    do_pick=do_pick,
+                    do_place=do_place,
+                )
+            elif item_type == "deepbox":
+                execute_pick_place_deepbox_sequence(
                     arx=arx,
                     pick_ref=pick_ref,
                     place_ref=place_ref,

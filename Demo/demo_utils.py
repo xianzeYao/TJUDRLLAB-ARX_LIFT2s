@@ -9,6 +9,10 @@ import numpy as np
 
 from arx_pointing import predict_multi_points_from_rgb
 from motion_pick_place_cup import build_pick_cup_sequence, build_place_cup_sequence
+from motion_pick_place_deepbox import (
+    build_pick_deepbox_sequence,
+    build_place_deepbox_sequence,
+)
 from motion_pick_place_straw import (
     build_pick_straw_sequence,
     build_place_straw_sequence,
@@ -200,5 +204,27 @@ def execute_pick_place_straw_sequence(
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_straw_sequence(place_ref, arm=arm)
+        for act in place_seq:
+            arx.step(act)
+
+
+def execute_pick_place_deepbox_sequence(
+    arx,
+    pick_ref: Optional[np.ndarray],
+    place_ref: Optional[np.ndarray],
+    arm: str,
+    do_pick: bool = True,
+    do_place: bool = True,
+) -> None:
+    if do_pick:
+        if pick_ref is None:
+            raise ValueError("pick_ref 为空")
+        pick_seq = build_pick_deepbox_sequence(pick_ref, arm=arm)
+        for act in pick_seq:
+            arx.step(act)
+    if do_place:
+        if place_ref is None:
+            raise ValueError("place_ref 为空")
+        place_seq = build_place_deepbox_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step(act)
