@@ -263,11 +263,45 @@ class ARXRobotEnv():
                 print(f"{side} arm homed")
         return (True, None)
 
-    def _send_special_mode(self, mode: int, targets: Tuple[str, ...]) -> Tuple[bool, str | None]:
+    @staticmethod
+    def _build_mode_cmd(mode: int, status) -> RobotCmd:
+        """
+        Build a mode-switch command while preserving the latest arm target.
+
+        `X5Controller::CmdCallback()` always forwards `end_pos`, `joint_pos`
+        and `gripper` before applying `mode`, so sending a zero-initialized
+        `RobotCmd` here would unintentionally reset the gripper and targets.
+        """
         cmd = RobotCmd()
         cmd.mode = int(mode)
+        if status is None:
+            return cmd
+
+        try:
+            end_pos = np.asarray(status.end_pos, dtype=np.float32).reshape(-1)
+            if end_pos.shape[0] >= 6:
+                cmd.end_pos = [float(x) for x in end_pos[:6]]
+        except Exception:
+            pass
+
+        try:
+            joint_pos = np.asarray(status.joint_pos, dtype=np.float32).reshape(-1)
+            if joint_pos.shape[0] >= 6:
+                cmd.joint_pos = [float(x) for x in joint_pos[:6]]
+            if joint_pos.shape[0] >= 7:
+                cmd.gripper = float(joint_pos[6])
+        except Exception:
+            pass
+        return cmd
+
+    def _send_special_mode(self, mode: int, targets: Tuple[str, ...]) -> Tuple[bool, str | None]:
+        status = self.get_robot_status()
         failed = []
         for target in targets:
+            cmd = self._build_mode_cmd(
+                mode,
+                status.get(target) if isinstance(status, dict) else None,
+            )
             if not self.node.send_control_msg(target, cmd):
                 failed.append(target)
         if failed:
@@ -627,7 +661,7 @@ def main():
     #                   camera_view=("camera_h",),
     #                   dir="testdata",
     #                   img_size=(640, 480))
-
+    
     obs = arx.reset()
     arx.step_lift(18.0)
     action = {
