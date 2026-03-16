@@ -1,12 +1,13 @@
 # Collect
 
-当前 `Collect/` 目录只保留三条链：
+当前 `Collect/` 目录主要保留这些采集/重放入口：
 
-- `collect_vr_two_arms.py`
-  - 双臂 VR 采集
-- `collect_one_arm.py`
-  - 单臂拖动采集
-  - 选中的手进入重力模式，另一只手按频率跟随
+- `collect_vr.py`
+  - `collect_vr_episode(..., arm_mode="single" | "dual")`
+- `collect_3dmouse.py`
+  - `collect_3dmouse_episode(..., arm_mode="single" | "dual")`
+- `collect_gravity.py`
+  - `collect_gravity_episode(..., arm_mode="single" | "dual")`
 - `replay.py`
   - 重放采集好的 episode
 
@@ -16,31 +17,35 @@
 - 通过 Python 函数参数控制保存路径、频率、相机、单/双臂模式
 - 双臂数据维度固定是 `14`
 - 单臂数据维度固定是 `7`
+- `action_kind` 只使用 `joint` 或 `eef`
 - `replay()` 会自动按 `7/14` 维判断单/双臂
 
 ## 最常用函数
 
-### 双臂 VR 采集
+### VR 采集
 
 ```python
-from Collect.collect_vr_two_arms import collect_vr_two_arms_episode
+from Collect.collect_vr import collect_vr_episode
 
-collect_vr_two_arms_episode(
-    out_dir="episodes_raw",
-    camera_names=("camera_h",),
-    include_camera=True,
-    include_base=True,
+collect_vr_episode(
+    env,
+    arm_mode="dual",
+    out_dir="episodes_raw/vr_upper_only",
+    camera_names=("camera_h", "camera_l", "camera_r"),
     action_kind="joint",
     frame_rate=15.0,
+    include_base=False,
 )
 ```
 
-### 单臂采集
+### 重力采集
 
 ```python
-from Collect.collect_one_arm import collect_one_arm_episode
+from Collect.collect_gravity import collect_gravity_episode
 
-collect_one_arm_episode(
+collect_gravity_episode(
+    env,
+    arm_mode="single",
     leader_side="left",
     out_dir="episodes_raw",
     action_kind="joint",
@@ -48,6 +53,37 @@ collect_one_arm_episode(
     mirror=True,
 )
 ```
+
+### 3D Mouse 采集
+
+依赖：
+
+- 需要额外安装 `pyspacemouse`
+
+```python
+from Collect.collect_3dmouse import collect_3dmouse_episode
+
+collect_3dmouse_episode(
+    env,
+    arm_mode="single",
+    leader_side="left",
+    out_dir="episodes_raw",
+    frame_rate=15.0,
+    control_rate=60.0,
+    task="pick up cup",
+)
+```
+
+默认按键：
+
+- `button0`: 夹爪收紧
+- `button1`: 夹爪张开
+
+默认按键：
+
+- `button0`: 当前激活手臂夹爪收紧
+- `button1`: 当前激活手臂夹爪张开
+- `button0 + button1`: 切换当前激活手臂
 
 ### 重放
 

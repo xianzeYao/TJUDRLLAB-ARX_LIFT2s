@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import select
 import sys
@@ -19,6 +20,7 @@ if str(ROS2_ROOT) not in sys.path:
     sys.path.insert(0, str(ROS2_ROOT))
 
 from arx_ros2_env import ARXRobotEnv
+from arx_ros2_env_utils import _quat_from_rpy, _quat_multiply, _rpy_from_quat
 from arm_control.msg._pos_cmd import PosCmd
 
 
@@ -26,6 +28,8 @@ KIWI_WHEEL_RADIUS_M = 0.15
 KIWI_BASE_RADIUS_M = 0.376
 SQRT3 = float(np.sqrt(3.0))
 EPISODE_SCHEMA_VERSION = "collect/v3"
+GRIPPER_OPEN_VALUE = -3.4
+GRIPPER_CLOSED_VALUE = 0.0
 
 
 def _stamp_to_float(stamp_like: Any) -> Optional[float]:
@@ -185,6 +189,157 @@ def _smooth_target(
     return filtered.astype(np.float32, copy=False)
 
 
+@dataclass(frozen=True)
+class SpaceMouseSample:
+    translation: np.ndarray
+    rotation: np.ndarray
+    buttons: tuple[bool, ...]
+    timestamp: float
+
+
+def _value_from_state(raw: Any, *names: str, default: float = 0.0) -> float:
+    for name in names:
+        if isinstance(raw, dict) and name in raw:
+            try:
+                return float(raw[name])
+            except Exception:
+                continue
+        if hasattr(raw, name):
+            try:
+                return float(getattr(raw, name))
+            except Exception:
+                continue
+    return float(default)
+
+
+def _buttons_from_state(raw: Any) -> tuple[bool, ...]:
+    payload = None
+    if isinstance(raw, dict):
+        payload = raw.get("buttons")
+    elif hasattr(raw, "buttons"):
+        payload = getattr(raw, "buttons")
+    if payload is not None:
+        if isinstance(payload, int):
+            return (bool(payload & 0x1), bool(payload & 0x2))
+        if isinstance(payload, np.ndarray):
+            payload = payload.reshape(-1).tolist()
+        if isinstance(payload, (list, tuple)):
+            return tuple(bool(value) for value in payload)
+    return (
+        bool(_value_from_state(raw, "button_0", "button0", "b0", "left_button", default=0.0)),
+        bool(_value_from_state(raw, "button_1", "button1", "b1", "right_button", default=0.0)),
+    )
+
+
+def _normalize_axis_signs(signs: Iterable[float], dim: int, label: str) -> np.ndarray:
+    values = np.asarray(tuple(signs), dtype=np.float32).reshape(-1)
+    if values.shape[0] != dim:
+        raise ValueError(f"{label} must have {dim} values, got {values.shape[0]}")
+    return values.astype(np.float32, copy=True)
+
+
+def _apply_axis_deadzone(values: np.ndarray, deadzone: float, exponent: float) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float32).reshape(-1).copy()
+    deadzone = max(float(deadzone), 0.0)
+    if deadzone > 0.0:
+        arr[np.abs(arr) < deadzone] = 0.0
+    exponent = max(float(exponent), 1.0)
+    if exponent != 1.0:
+        arr = np.sign(arr) * np.power(np.abs(arr), exponent)
+    return arr.astype(np.float32, copy=False)
+
+
+def _clip_gripper(value: float) -> float:
+    return float(np.clip(value, GRIPPER_OPEN_VALUE, GRIPPER_CLOSED_VALUE))
+
+
+def _compose_eef_target(current: np.ndarray, delta_xyz: np.ndarray, delta_rpy: np.ndarray, gripper_delta: float) -> np.ndarray:
+    current = np.asarray(current, dtype=np.float32).reshape(-1)
+    if current.shape[0] < 7:
+        raise ValueError(f"EEF payload must be 7D, got {current.shape[0]}")
+    target_xyz = current[:3] + np.asarray(delta_xyz, dtype=np.float32).reshape(3)
+    q_current = _quat_from_rpy(current[3:6])
+    q_delta = _quat_from_rpy(np.asarray(delta_rpy, dtype=np.float32).reshape(3))
+    q_target = _quat_multiply(q_delta, q_current)
+    target_rpy = _rpy_from_quat(q_target)
+    target_gripper = _clip_gripper(float(current[6]) + float(gripper_delta))
+    return np.concatenate([target_xyz, target_rpy, [target_gripper]], axis=0).astype(np.float32)
+
+
+def _effective_motion(delta_xyz: np.ndarray, delta_rpy: np.ndarray, gripper_delta: float) -> bool:
+    if np.max(np.abs(np.asarray(delta_xyz, dtype=np.float32))) > 1e-6:
+        return True
+    if np.max(np.abs(np.asarray(delta_rpy, dtype=np.float32))) > 1e-6:
+        return True
+    return abs(float(gripper_delta)) > 1e-6
+
+
+class SpaceMouseDevice:
+    def __init__(self):
+        try:
+            self._backend = importlib.import_module("pyspacemouse")
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError(
+                "3D mouse collection requires the optional `pyspacemouse` package. "
+                "Install it in the active Python environment before using collect_3dmouse_*."
+            ) from exc
+        opener = getattr(self._backend, "open", None)
+        if opener is None:
+            raise RuntimeError("`pyspacemouse` backend does not expose open().")
+        try:
+            opened = opener()
+        except TypeError:
+            opened = opener(dof_callback=None, button_callback=None)
+        if opened is False:
+            raise RuntimeError(
+                "Failed to open SpaceMouse device. Ensure the device is connected and accessible."
+            )
+
+    def read(self) -> SpaceMouseSample:
+        reader = getattr(self._backend, "read", None)
+        if reader is None:
+            raise RuntimeError("`pyspacemouse` backend does not expose read().")
+        raw = reader()
+        if raw is None:
+            return SpaceMouseSample(
+                translation=np.zeros((3,), dtype=np.float32),
+                rotation=np.zeros((3,), dtype=np.float32),
+                buttons=(False, False),
+                timestamp=time.time(),
+            )
+        translation = np.array(
+            [
+                _value_from_state(raw, "x", default=0.0),
+                _value_from_state(raw, "y", default=0.0),
+                _value_from_state(raw, "z", default=0.0),
+            ],
+            dtype=np.float32,
+        )
+        rotation = np.array(
+            [
+                _value_from_state(raw, "roll", "rx", default=0.0),
+                _value_from_state(raw, "pitch", "ry", default=0.0),
+                _value_from_state(raw, "yaw", "rz", default=0.0),
+            ],
+            dtype=np.float32,
+        )
+        return SpaceMouseSample(
+            translation=translation,
+            rotation=rotation,
+            buttons=_buttons_from_state(raw),
+            timestamp=time.time(),
+        )
+
+    def close(self) -> None:
+        closer = getattr(self._backend, "close", None)
+        if closer is None:
+            return
+        try:
+            closer()
+        except Exception:
+            pass
+
+
 def _capture_camera_and_status(
     env: ARXRobotEnv,
     include_camera: bool,
@@ -308,7 +463,7 @@ class EpisodeBuffer:
     episode_idx: int
     mode: Literal["dual", "single"]
     frame_rate: float
-    action_kind: Literal["joint", "eef", "vr"]
+    action_kind: Literal["joint", "eef"]
     include_camera: bool
     include_base: bool
     camera_map: Dict[str, str]
@@ -348,7 +503,7 @@ def create_episode_buffer(
     episode_idx: int,
     mode: Literal["dual", "single"],
     frame_rate: float,
-    action_kind: Literal["joint", "eef", "vr"],
+    action_kind: Literal["joint", "eef"],
     include_camera: bool,
     include_base: bool,
     camera_names: Iterable[str],
@@ -366,6 +521,15 @@ def create_episode_buffer(
         config=dict(config),
         side=side,
     )
+
+
+def _normalize_action_kind(action_kind: str) -> Literal["joint", "eef"]:
+    kind = str(action_kind).strip().lower()
+    if kind == "vr":
+        return "eef"
+    if kind in {"joint", "eef"}:
+        return kind
+    raise ValueError(f"Unsupported action kind: {action_kind}")
 
 
 def save_episode(episode: EpisodeBuffer, out_dir: Path) -> Path:
@@ -457,7 +621,7 @@ def load_episode(episode_dir: Path) -> EpisodeBuffer:
         episode_idx=int(manifest["episode_idx"]),
         mode=str(manifest["mode"]),
         frame_rate=float(manifest["frame_rate"]),
-        action_kind=str(manifest["action_kind"]),
+        action_kind=_normalize_action_kind(manifest["action_kind"]),
         include_camera=bool(manifest.get("include_camera", False)),
         include_base=bool(manifest.get("include_base", False)),
         camera_map=dict(manifest.get("camera_map", {})),
@@ -615,7 +779,7 @@ class DualVRCollector:
         include_camera: bool = True,
         include_base: bool = True,
         use_depth: bool = False,
-        action_kind: Literal["joint", "eef", "vr"] = "joint",
+        action_kind: Literal["joint", "eef"] = "joint",
         left_vr_topic: str = "/ARX_VR_L",
         right_vr_topic: str = "/ARX_VR_R",
         img_size: tuple[int, int] = (640, 480),
@@ -623,7 +787,7 @@ class DualVRCollector:
         self.env = env
         self.include_camera = bool(include_camera)
         self.include_base = bool(include_base)
-        self.action_kind = str(action_kind)
+        self.action_kind = _normalize_action_kind(action_kind)
         self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
@@ -721,8 +885,6 @@ class DualVRCollector:
 
         if self.action_kind == "joint":
             action = qpos.copy()
-        elif self.action_kind == "eef":
-            action = eef.copy()
         else:
             action = np.concatenate([vr_left_arm, vr_right_arm], axis=0)
 
@@ -1099,3 +1261,456 @@ class SingleArmMirrorCollector:
 
     def close(self) -> None:
         self.stop_control()
+
+
+class SingleArmSpaceMouseCollector:
+    def __init__(
+        self,
+        env: ARXRobotEnv,
+        side: Literal["left", "right"],
+        camera_names: Iterable[str] = (),
+        include_camera: bool = False,
+        use_depth: bool = False,
+        img_size: tuple[int, int] = (640, 480),
+        control_rate: float = 60.0,
+        translation_speed: float = 0.10,
+        rotation_speed: float = 0.60,
+        gripper_speed: float = 2.5,
+        translation_deadzone: float = 0.05,
+        rotation_deadzone: float = 0.05,
+        response_exponent: float = 1.5,
+        translation_axis_signs: Iterable[float] = (1.0, 1.0, 1.0),
+        rotation_axis_signs: Iterable[float] = (1.0, 1.0, 1.0),
+    ):
+        if side not in {"left", "right"}:
+            raise ValueError("side must be 'left' or 'right'")
+        if control_rate <= 0.0:
+            raise ValueError("control_rate must be > 0")
+        self.env = env
+        self.side: Literal["left", "right"] = side
+        self.include_camera = bool(include_camera)
+        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_type = "all" if use_depth else "color"
+        self.img_size = tuple(img_size)
+        self.control_rate = float(control_rate)
+        self.translation_speed = float(translation_speed)
+        self.rotation_speed = float(rotation_speed)
+        self.gripper_speed = float(gripper_speed)
+        self.translation_deadzone = float(translation_deadzone)
+        self.rotation_deadzone = float(rotation_deadzone)
+        self.response_exponent = float(response_exponent)
+        self.translation_axis_signs = _normalize_axis_signs(translation_axis_signs, 3, "translation_axis_signs")
+        self.rotation_axis_signs = _normalize_axis_signs(rotation_axis_signs, 3, "rotation_axis_signs")
+        self.spacemouse = SpaceMouseDevice()
+        self._latest_command: Optional[np.ndarray] = None
+        self._control_lock = threading.Lock()
+        self._control_thread: Optional[threading.Thread] = None
+        self._control_stop = threading.Event()
+        if self.include_camera:
+            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            if missing_cameras:
+                raise ValueError(f"env.camera_view does not include requested cameras: {missing_cameras}")
+            if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
+                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+
+    def wait_until_ready(self) -> None:
+        last_report = 0.0
+        while True:
+            status = self.env.get_robot_status()
+            missing = []
+            if status.get(self.side) is None:
+                missing.append(f"{self.side}_arm_status")
+            if self.include_camera:
+                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+            if not missing:
+                return
+            now = time.time()
+            if now - last_report > 1.0:
+                print(f"Waiting for streams: {', '.join(missing)}")
+                last_report = now
+            time.sleep(0.2)
+
+    def prepare(self) -> None:
+        with self._control_lock:
+            self._latest_command = None
+        time.sleep(0.1)
+        self.start_control()
+
+    def start_control(self) -> None:
+        self.stop_control()
+        self._control_stop.clear()
+        self._control_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._control_thread.start()
+
+    def stop_control(self) -> None:
+        self._control_stop.set()
+        if self._control_thread is not None:
+            self._control_thread.join(timeout=1.0)
+            self._control_thread = None
+
+    def _command_snapshot(self) -> Optional[np.ndarray]:
+        with self._control_lock:
+            if self._latest_command is None:
+                return None
+            return self._latest_command.copy()
+
+    def _motion_from_sample(self, sample: SpaceMouseSample, dt: float) -> tuple[np.ndarray, np.ndarray, float]:
+        translation = _apply_axis_deadzone(
+            sample.translation * self.translation_axis_signs,
+            self.translation_deadzone,
+            self.response_exponent,
+        ) * (self.translation_speed * float(dt))
+        rotation = _apply_axis_deadzone(
+            sample.rotation * self.rotation_axis_signs,
+            self.rotation_deadzone,
+            self.response_exponent,
+        ) * (self.rotation_speed * float(dt))
+        buttons = tuple(bool(v) for v in sample.buttons)
+        close_pressed = len(buttons) > 0 and buttons[0]
+        open_pressed = len(buttons) > 1 and buttons[1]
+        if close_pressed and not open_pressed:
+            gripper_delta = self.gripper_speed * float(dt)
+        elif open_pressed and not close_pressed:
+            gripper_delta = -self.gripper_speed * float(dt)
+        else:
+            gripper_delta = 0.0
+        return translation.astype(np.float32), rotation.astype(np.float32), float(gripper_delta)
+
+    def _control_once(self, dt: float) -> bool:
+        status = self.env.get_robot_status()
+        arm_status = status.get(self.side) if isinstance(status, dict) else None
+        if arm_status is None:
+            return False
+        sample = self.spacemouse.read()
+        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(sample, dt)
+        if not _effective_motion(delta_xyz, delta_rpy, gripper_delta):
+            return True
+        target = _compose_eef_target(_arm_eef(arm_status), delta_xyz, delta_rpy, gripper_delta)
+        self.env.step_raw_eef({self.side: target})
+        with self._control_lock:
+            self._latest_command = target.copy()
+        return True
+
+    def _control_loop(self) -> None:
+        period = 1.0 / max(self.control_rate, 1e-6)
+        last_tick = time.perf_counter()
+        last_error_report = 0.0
+        while not self._control_stop.is_set():
+            loop_start = time.perf_counter()
+            now = loop_start
+            dt = min(max(now - last_tick, period), 0.2)
+            last_tick = now
+            try:
+                ok = self._control_once(dt)
+                if not ok:
+                    report_t = time.time()
+                    if report_t - last_error_report > 1.0:
+                        print(f"SpaceMouse control waiting for {self.side} arm status.")
+                        last_error_report = report_t
+            except Exception as exc:
+                report_t = time.time()
+                if report_t - last_error_report > 1.0:
+                    print(f"SpaceMouse control error: {exc}")
+                    last_error_report = report_t
+            sleep_need = period - (time.perf_counter() - loop_start)
+            if sleep_need > 0.0:
+                time.sleep(sleep_need)
+
+    def capture_frame(self, frame_idx: int) -> tuple[Optional[EpisodeFrame], Optional[str]]:
+        frame_timestamp = time.time()
+        camera_frames, status = _capture_camera_and_status(
+            self.env,
+            include_camera=self.include_camera,
+            target_size=self.img_size,
+        )
+        arm_status = status.get(self.side) if isinstance(status, dict) else None
+        if arm_status is None:
+            return None, f"{self.side} arm status not ready"
+
+        color_frames, depth_frames = _extract_camera_frames(
+            camera_frames,
+            camera_map=default_camera_map(self.camera_names),
+            include_depth=self.camera_type == "all",
+        )
+        expected_cameras = set(default_camera_map(self.camera_names).values())
+        if self.include_camera and set(color_frames.keys()) != expected_cameras:
+            return None, "camera color frames not ready"
+        if self.include_camera and self.camera_type == "all" and set(depth_frames.keys()) != expected_cameras:
+            return None, "camera depth frames not ready"
+
+        qpos = _arm_qpos(arm_status)
+        qvel = _arm_qvel(arm_status)
+        effort = _arm_effort(arm_status)
+        eef = _arm_eef(arm_status)
+        action = self._command_snapshot()
+        if action is None:
+            action = eef.copy()
+
+        return EpisodeFrame(
+            frame_idx=int(frame_idx),
+            timestamp=float(frame_timestamp),
+            qpos=qpos,
+            qvel=qvel,
+            effort=effort,
+            eef=eef,
+            action=np.asarray(action, dtype=np.float32),
+            images=color_frames if self.include_camera else {},
+            images_depth=depth_frames if self.include_camera else {},
+            topic_stamps=_build_topic_stamps(
+                self.env,
+                left_status=status.get("left") if isinstance(status, dict) else None,
+                right_status=status.get("right") if isinstance(status, dict) else None,
+            ),
+        ), None
+
+    def close(self) -> None:
+        self.stop_control()
+        self.spacemouse.close()
+
+
+class DualArmSpaceMouseCollector:
+    def __init__(
+        self,
+        env: ARXRobotEnv,
+        camera_names: Iterable[str] = (),
+        include_camera: bool = False,
+        use_depth: bool = False,
+        img_size: tuple[int, int] = (640, 480),
+        control_rate: float = 60.0,
+        translation_speed: float = 0.10,
+        rotation_speed: float = 0.60,
+        gripper_speed: float = 2.5,
+        translation_deadzone: float = 0.05,
+        rotation_deadzone: float = 0.05,
+        response_exponent: float = 1.5,
+        translation_axis_signs: Iterable[float] = (1.0, 1.0, 1.0),
+        rotation_axis_signs: Iterable[float] = (1.0, 1.0, 1.0),
+        initial_active_side: Literal["left", "right"] = "left",
+    ):
+        if control_rate <= 0.0:
+            raise ValueError("control_rate must be > 0")
+        if initial_active_side not in {"left", "right"}:
+            raise ValueError("initial_active_side must be 'left' or 'right'")
+        self.env = env
+        self.include_camera = bool(include_camera)
+        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_type = "all" if use_depth else "color"
+        self.img_size = tuple(img_size)
+        self.control_rate = float(control_rate)
+        self.translation_speed = float(translation_speed)
+        self.rotation_speed = float(rotation_speed)
+        self.gripper_speed = float(gripper_speed)
+        self.translation_deadzone = float(translation_deadzone)
+        self.rotation_deadzone = float(rotation_deadzone)
+        self.response_exponent = float(response_exponent)
+        self.translation_axis_signs = _normalize_axis_signs(translation_axis_signs, 3, "translation_axis_signs")
+        self.rotation_axis_signs = _normalize_axis_signs(rotation_axis_signs, 3, "rotation_axis_signs")
+        self.initial_active_side: Literal["left", "right"] = initial_active_side
+        self._active_side: Literal["left", "right"] = initial_active_side
+        self._last_buttons: tuple[bool, bool] = (False, False)
+        self.spacemouse = SpaceMouseDevice()
+        self._latest_commands: Dict[str, Optional[np.ndarray]] = {"left": None, "right": None}
+        self._control_lock = threading.Lock()
+        self._control_thread: Optional[threading.Thread] = None
+        self._control_stop = threading.Event()
+        if self.include_camera:
+            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            if missing_cameras:
+                raise ValueError(f"env.camera_view does not include requested cameras: {missing_cameras}")
+            if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
+                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+
+    @property
+    def active_side(self) -> Literal["left", "right"]:
+        return self._active_side
+
+    def wait_until_ready(self) -> None:
+        last_report = 0.0
+        while True:
+            status = self.env.get_robot_status()
+            missing = []
+            if status.get("left") is None:
+                missing.append("left_arm_status")
+            if status.get("right") is None:
+                missing.append("right_arm_status")
+            if self.include_camera:
+                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+            if not missing:
+                return
+            now = time.time()
+            if now - last_report > 1.0:
+                print(f"Waiting for streams: {', '.join(missing)}")
+                last_report = now
+            time.sleep(0.2)
+
+    def prepare(self) -> None:
+        self._active_side = self.initial_active_side
+        self._last_buttons = (False, False)
+        with self._control_lock:
+            self._latest_commands = {"left": None, "right": None}
+        print(
+            "Dual 3D mouse mapping: button0=close gripper, button1=open gripper, "
+            "press both buttons together to switch active arm."
+        )
+        print(f"Active arm: {self._active_side}")
+        time.sleep(0.1)
+        self.start_control()
+
+    def start_control(self) -> None:
+        self.stop_control()
+        self._control_stop.clear()
+        self._control_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._control_thread.start()
+
+    def stop_control(self) -> None:
+        self._control_stop.set()
+        if self._control_thread is not None:
+            self._control_thread.join(timeout=1.0)
+            self._control_thread = None
+
+    def _command_snapshot(self) -> Dict[str, Optional[np.ndarray]]:
+        with self._control_lock:
+            return {
+                "left": None if self._latest_commands["left"] is None else self._latest_commands["left"].copy(),
+                "right": None if self._latest_commands["right"] is None else self._latest_commands["right"].copy(),
+            }
+
+    def _motion_from_sample(self, sample: SpaceMouseSample, dt: float) -> tuple[np.ndarray, np.ndarray, float]:
+        translation = _apply_axis_deadzone(
+            sample.translation * self.translation_axis_signs,
+            self.translation_deadzone,
+            self.response_exponent,
+        ) * (self.translation_speed * float(dt))
+        rotation = _apply_axis_deadzone(
+            sample.rotation * self.rotation_axis_signs,
+            self.rotation_deadzone,
+            self.response_exponent,
+        ) * (self.rotation_speed * float(dt))
+        buttons = tuple(bool(v) for v in sample.buttons)
+        close_pressed = len(buttons) > 0 and buttons[0]
+        open_pressed = len(buttons) > 1 and buttons[1]
+        both_pressed = close_pressed and open_pressed
+        if both_pressed and not (self._last_buttons[0] and self._last_buttons[1]):
+            self._active_side = "right" if self._active_side == "left" else "left"
+            print(f"Active arm switched to {self._active_side}")
+        self._last_buttons = (close_pressed, open_pressed)
+        if both_pressed:
+            gripper_delta = 0.0
+        elif close_pressed:
+            gripper_delta = self.gripper_speed * float(dt)
+        elif open_pressed:
+            gripper_delta = -self.gripper_speed * float(dt)
+        else:
+            gripper_delta = 0.0
+        return translation.astype(np.float32), rotation.astype(np.float32), float(gripper_delta)
+
+    def _control_once(self, dt: float) -> bool:
+        status = self.env.get_robot_status()
+        left_status = status.get("left") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(status, dict) else None
+        if left_status is None or right_status is None:
+            return False
+
+        current_eef = {
+            "left": _arm_eef(left_status),
+            "right": _arm_eef(right_status),
+        }
+        with self._control_lock:
+            for side in ("left", "right"):
+                if self._latest_commands[side] is None:
+                    self._latest_commands[side] = current_eef[side].copy()
+
+        sample = self.spacemouse.read()
+        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(sample, dt)
+        if not _effective_motion(delta_xyz, delta_rpy, gripper_delta):
+            return True
+
+        active_side = self._active_side
+        target = _compose_eef_target(current_eef[active_side], delta_xyz, delta_rpy, gripper_delta)
+        self.env.step_raw_eef({active_side: target})
+        with self._control_lock:
+            self._latest_commands[active_side] = target.copy()
+        return True
+
+    def _control_loop(self) -> None:
+        period = 1.0 / max(self.control_rate, 1e-6)
+        last_tick = time.perf_counter()
+        last_error_report = 0.0
+        while not self._control_stop.is_set():
+            loop_start = time.perf_counter()
+            now = loop_start
+            dt = min(max(now - last_tick, period), 0.2)
+            last_tick = now
+            try:
+                ok = self._control_once(dt)
+                if not ok:
+                    report_t = time.time()
+                    if report_t - last_error_report > 1.0:
+                        print("Dual 3D mouse control waiting for arm status.")
+                        last_error_report = report_t
+            except Exception as exc:
+                report_t = time.time()
+                if report_t - last_error_report > 1.0:
+                    print(f"Dual 3D mouse control error: {exc}")
+                    last_error_report = report_t
+            sleep_need = period - (time.perf_counter() - loop_start)
+            if sleep_need > 0.0:
+                time.sleep(sleep_need)
+
+    def capture_frame(self, frame_idx: int) -> tuple[Optional[EpisodeFrame], Optional[str]]:
+        frame_timestamp = time.time()
+        camera_frames, status = _capture_camera_and_status(
+            self.env,
+            include_camera=self.include_camera,
+            target_size=self.img_size,
+        )
+        left_status = status.get("left") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(status, dict) else None
+        if left_status is None or right_status is None:
+            return None, "arm status not ready"
+
+        color_frames, depth_frames = _extract_camera_frames(
+            camera_frames,
+            camera_map=default_camera_map(self.camera_names),
+            include_depth=self.camera_type == "all",
+        )
+        expected_cameras = set(default_camera_map(self.camera_names).values())
+        if self.include_camera and set(color_frames.keys()) != expected_cameras:
+            return None, "camera color frames not ready"
+        if self.include_camera and self.camera_type == "all" and set(depth_frames.keys()) != expected_cameras:
+            return None, "camera depth frames not ready"
+
+        left_qpos = _arm_qpos(left_status)
+        right_qpos = _arm_qpos(right_status)
+        left_qvel = _arm_qvel(left_status)
+        right_qvel = _arm_qvel(right_status)
+        left_effort = _arm_effort(left_status)
+        right_effort = _arm_effort(right_status)
+        left_eef = _arm_eef(left_status)
+        right_eef = _arm_eef(right_status)
+        command_snapshot = self._command_snapshot()
+        left_action = command_snapshot["left"] if command_snapshot["left"] is not None else left_eef.copy()
+        right_action = command_snapshot["right"] if command_snapshot["right"] is not None else right_eef.copy()
+
+        return EpisodeFrame(
+            frame_idx=int(frame_idx),
+            timestamp=float(frame_timestamp),
+            qpos=np.concatenate([left_qpos, right_qpos], axis=0),
+            qvel=np.concatenate([left_qvel, right_qvel], axis=0),
+            effort=np.concatenate([left_effort, right_effort], axis=0),
+            eef=np.concatenate([left_eef, right_eef], axis=0),
+            action=np.concatenate([left_action, right_action], axis=0).astype(np.float32),
+            images=color_frames if self.include_camera else {},
+            images_depth=depth_frames if self.include_camera else {},
+            topic_stamps=_build_topic_stamps(
+                self.env,
+                left_status=left_status,
+                right_status=right_status,
+            ),
+        ), None
+
+    def close(self) -> None:
+        self.stop_control()
+        self.spacemouse.close()
