@@ -64,7 +64,7 @@ def collect_vr_episode(
     env: ARXRobotEnv,
     arm_mode: str = "dual",
     out_dir: Path | str = "episodes_raw",
-    frame_rate: float = 15.0,
+    frame_rate: float = 20.0,
     max_frames: int = 0,
     max_episodes: int = 0,
     action_kind: str = "joint",
@@ -211,12 +211,32 @@ def main() -> None:
             env,
             arm_mode="dual",
             out_dir="episodes_raw/vr_dual",
-            frame_rate=15.0,
+            frame_rate=20.0,
+            max_frames=0,
+            max_episodes=0,
             action_kind="joint",
             camera_names=("camera_h", "camera_l", "camera_r"),
+            with_depth=False,
+            img_size=(640, 480),
+            task="",
+            leader_side="left",
             include_base=False,
         )
-        # collect_vr_episode(env, arm_mode="single", out_dir="episodes_raw/vr_single", leader_side="left")
+        # collect_vr_episode(
+        #     env,
+        #     arm_mode="single",
+        #     out_dir="episodes_raw/vr_single",
+        #     frame_rate=20.0,
+        #     max_frames=0,
+        #     max_episodes=0,
+        #     action_kind="joint",
+        #     camera_names=("camera_h", "camera_l", "camera_r"),
+        #     with_depth=False,
+        #     img_size=(640, 480),
+        #     task="",
+        #     leader_side="left",
+        #     include_base=False,
+        # )
     finally:
         env.close()
 

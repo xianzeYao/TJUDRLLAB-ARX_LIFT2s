@@ -19,9 +19,12 @@ ROS2_ROOT = (ROOT_DIR / "ARX_Realenv" / "ROS2").resolve()
 if str(ROS2_ROOT) not in sys.path:
     sys.path.insert(0, str(ROS2_ROOT))
 
-from arx_ros2_env import ARXRobotEnv
-from arx_ros2_env_utils import _quat_from_rpy, _quat_multiply, _rpy_from_quat
-from arm_control.msg._pos_cmd import PosCmd
+PosCmd = importlib.import_module("arm_control.msg._pos_cmd").PosCmd
+ARXRobotEnv = importlib.import_module("arx_ros2_env").ARXRobotEnv
+_arx_ros2_env_utils = importlib.import_module("arx_ros2_env_utils")
+_quat_from_rpy = _arx_ros2_env_utils._quat_from_rpy
+_quat_multiply = _arx_ros2_env_utils._quat_multiply
+_rpy_from_quat = _arx_ros2_env_utils._rpy_from_quat
 
 
 KIWI_WHEEL_RADIUS_M = 0.15
@@ -152,7 +155,8 @@ def _base_velocity_from_wheels(base_wheels: np.ndarray) -> np.ndarray:
         [
             KIWI_WHEEL_RADIUS_M * (2.0 * omega1 - omega2 - omega3) / 3.0,
             KIWI_WHEEL_RADIUS_M * (omega2 - omega3) / SQRT3,
-            KIWI_WHEEL_RADIUS_M * (omega1 + omega2 + omega3) / (3.0 * KIWI_BASE_RADIUS_M),
+            KIWI_WHEEL_RADIUS_M * (omega1 + omega2 + omega3) /
+            (3.0 * KIWI_BASE_RADIUS_M),
         ],
         dtype=np.float32,
     )
@@ -163,7 +167,8 @@ def _deadband_vector(deadband: float | Iterable[float], dim: int) -> np.ndarray:
     if values.shape[0] == 1:
         return np.full((dim,), float(values[0]), dtype=np.float32)
     if values.shape[0] != dim:
-        raise ValueError(f"Deadband dim mismatch: expected 1 or {dim}, got {values.shape[0]}")
+        raise ValueError(
+            f"Deadband dim mismatch: expected 1 or {dim}, got {values.shape[0]}")
     return values.astype(np.float32, copy=True)
 
 
@@ -181,7 +186,8 @@ def _smooth_target(
         raise ValueError(f"alpha must be in (0, 1], got {alpha}")
     previous = np.asarray(previous, dtype=np.float32).reshape(-1)
     if previous.shape != target.shape:
-        raise ValueError(f"Target shape mismatch: {previous.shape} vs {target.shape}")
+        raise ValueError(
+            f"Target shape mismatch: {previous.shape} vs {target.shape}")
     filtered = alpha * target + (1.0 - alpha) * previous
     thresholds = _deadband_vector(deadband, filtered.shape[0])
     delta = np.abs(filtered - previous)
@@ -226,15 +232,18 @@ def _buttons_from_state(raw: Any) -> tuple[bool, ...]:
         if isinstance(payload, (list, tuple)):
             return tuple(bool(value) for value in payload)
     return (
-        bool(_value_from_state(raw, "button_0", "button0", "b0", "left_button", default=0.0)),
-        bool(_value_from_state(raw, "button_1", "button1", "b1", "right_button", default=0.0)),
+        bool(_value_from_state(raw, "button_0", "button0",
+             "b0", "left_button", default=0.0)),
+        bool(_value_from_state(raw, "button_1", "button1",
+             "b1", "right_button", default=0.0)),
     )
 
 
 def _normalize_axis_signs(signs: Iterable[float], dim: int, label: str) -> np.ndarray:
     values = np.asarray(tuple(signs), dtype=np.float32).reshape(-1)
     if values.shape[0] != dim:
-        raise ValueError(f"{label} must have {dim} values, got {values.shape[0]}")
+        raise ValueError(
+            f"{label} must have {dim} values, got {values.shape[0]}")
     return values.astype(np.float32, copy=True)
 
 
@@ -257,9 +266,11 @@ def _compose_eef_target(current: np.ndarray, delta_xyz: np.ndarray, delta_rpy: n
     current = np.asarray(current, dtype=np.float32).reshape(-1)
     if current.shape[0] < 7:
         raise ValueError(f"EEF payload must be 7D, got {current.shape[0]}")
-    target_xyz = current[:3] + np.asarray(delta_xyz, dtype=np.float32).reshape(3)
+    target_xyz = current[:3] + \
+        np.asarray(delta_xyz, dtype=np.float32).reshape(3)
     q_current = _quat_from_rpy(current[3:6])
-    q_delta = _quat_from_rpy(np.asarray(delta_rpy, dtype=np.float32).reshape(3))
+    q_delta = _quat_from_rpy(np.asarray(
+        delta_rpy, dtype=np.float32).reshape(3))
     q_target = _quat_multiply(q_delta, q_current)
     target_rpy = _rpy_from_quat(q_target)
     target_gripper = _clip_gripper(float(current[6]) + float(gripper_delta))
@@ -285,7 +296,8 @@ class SpaceMouseDevice:
             ) from exc
         opener = getattr(self._backend, "open", None)
         if opener is None:
-            raise RuntimeError("`pyspacemouse` backend does not expose open().")
+            raise RuntimeError(
+                "`pyspacemouse` backend does not expose open().")
         try:
             opened = opener()
         except TypeError:
@@ -298,7 +310,8 @@ class SpaceMouseDevice:
     def read(self) -> SpaceMouseSample:
         reader = getattr(self._backend, "read", None)
         if reader is None:
-            raise RuntimeError("`pyspacemouse` backend does not expose read().")
+            raise RuntimeError(
+                "`pyspacemouse` backend does not expose read().")
         raw = reader()
         if raw is None:
             return SpaceMouseSample(
@@ -367,7 +380,10 @@ def _extract_camera_frames(
         color_key = f"{physical_name}_color"
         depth_key = f"{physical_name}_aligned_depth_to_color"
         if color_key in camera_frames:
-            colors[logical_name] = np.asarray(camera_frames[color_key])
+            color = np.asarray(camera_frames[color_key])
+            if color.ndim == 3 and color.shape[2] == 3:
+                color = color[:, :, ::-1].copy()
+            colors[logical_name] = color
         if include_depth and depth_key in camera_frames:
             depths[logical_name] = np.asarray(camera_frames[depth_key])
     return colors, depths
@@ -402,13 +418,17 @@ def _build_topic_stamps(
     stamps: Dict[str, Optional[float]] = {}
     with env.node.cam_lock:
         for key, msg in env.node.latest_images.items():
-            stamps[f"camera:{key}"] = _stamp_to_float(getattr(msg, "header", None))
+            stamps[f"camera:{key}"] = _stamp_to_float(
+                getattr(msg, "header", None))
     if left_status is not None:
-        stamps["arm_status_left"] = _stamp_to_float(getattr(left_status, "header", None))
+        stamps["arm_status_left"] = _stamp_to_float(
+            getattr(left_status, "header", None))
     if right_status is not None:
-        stamps["arm_status_right"] = _stamp_to_float(getattr(right_status, "header", None))
+        stamps["arm_status_right"] = _stamp_to_float(
+            getattr(right_status, "header", None))
     if base_status is not None:
-        stamps["base_status"] = _stamp_to_float(getattr(base_status, "header", None))
+        stamps["base_status"] = _stamp_to_float(
+            getattr(base_status, "header", None))
     if left_vr_stamp is not None:
         stamps["vr_left"] = left_vr_stamp
     if right_vr_stamp is not None:
@@ -419,7 +439,8 @@ def _build_topic_stamps(
 def _set_gravity_mode(env: ARXRobotEnv, side: Literal["left", "right"]) -> None:
     success, error_message = env.set_special_mode(3, side=side)
     if not success:
-        raise RuntimeError(error_message or f"Failed to enable gravity mode for {side}")
+        raise RuntimeError(
+            error_message or f"Failed to enable gravity mode for {side}")
 
 
 def _expected_dim(mode: Literal["dual", "single"]) -> int:
@@ -429,7 +450,8 @@ def _expected_dim(mode: Literal["dual", "single"]) -> int:
 def _split_dual(array: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     payload = np.asarray(array, dtype=np.float32).reshape(-1)
     if payload.shape[0] != 14:
-        raise ValueError(f"Expected dual-arm payload dim 14, got {payload.shape[0]}")
+        raise ValueError(
+            f"Expected dual-arm payload dim 14, got {payload.shape[0]}")
     return payload[:7].copy(), payload[7:14].copy()
 
 
@@ -469,7 +491,8 @@ class EpisodeBuffer:
     camera_map: Dict[str, str]
     config: Dict[str, Any]
     side: Optional[Literal["left", "right"]] = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat())
     frames: list[EpisodeFrame] = field(default_factory=list)
 
     @property
@@ -483,9 +506,11 @@ class EpisodeBuffer:
     def add_frame(self, frame: EpisodeFrame) -> None:
         dim = self.dim
         for name in ("qpos", "qvel", "effort", "eef", "action"):
-            array = np.asarray(getattr(frame, name), dtype=np.float32).reshape(-1)
+            array = np.asarray(getattr(frame, name),
+                               dtype=np.float32).reshape(-1)
             if array.shape[0] != dim:
-                raise ValueError(f"{name} dim mismatch: expected {dim}, got {array.shape[0]}")
+                raise ValueError(
+                    f"{name} dim mismatch: expected {dim}, got {array.shape[0]}")
         expected_cameras = set(self.camera_map.values())
         if self.include_camera and set(frame.images.keys()) != expected_cameras:
             raise ValueError(
@@ -550,13 +575,17 @@ def save_episode(episode: EpisodeBuffer, out_dir: Path) -> Path:
         "action": np.stack([frame.action for frame in episode.frames], axis=0),
     }
     if episode.include_base:
-        low_dim_payload["robot_base"] = np.stack([frame.robot_base for frame in episode.frames], axis=0)
-        low_dim_payload["base_wheels"] = np.stack([frame.base_wheels for frame in episode.frames], axis=0)
-        low_dim_payload["base_velocity"] = np.stack([frame.base_velocity for frame in episode.frames], axis=0)
-        low_dim_payload["action_base"] = np.stack([frame.action_base for frame in episode.frames], axis=0)
+        low_dim_payload["robot_base"] = np.stack(
+            [frame.robot_base for frame in episode.frames], axis=0)
+        low_dim_payload["base_wheels"] = np.stack(
+            [frame.base_wheels for frame in episode.frames], axis=0)
+        low_dim_payload["base_velocity"] = np.stack(
+            [frame.base_velocity for frame in episode.frames], axis=0)
+        low_dim_payload["action_base"] = np.stack(
+            [frame.action_base for frame in episode.frames], axis=0)
 
     low_dim_path = episode_dir / "low_dim.npz"
-    np.savez_compressed(low_dim_path, **low_dim_payload)
+    np.savez(low_dim_path, **low_dim_payload)
 
     image_files: Dict[str, str] = {}
     depth_files: Dict[str, str] = {}
@@ -564,9 +593,10 @@ def save_episode(episode: EpisodeBuffer, out_dir: Path) -> Path:
         image_root = episode_dir / "images"
         image_root.mkdir(parents=True, exist_ok=True)
         for logical_name in episode.camera_map.values():
-            frames = np.stack([frame.images[logical_name] for frame in episode.frames], axis=0)
+            frames = np.stack([frame.images[logical_name]
+                              for frame in episode.frames], axis=0)
             file_path = image_root / f"{logical_name}.npz"
-            np.savez_compressed(file_path, frames=frames)
+            np.savez(file_path, frames=frames)
             image_files[logical_name] = str(file_path.relative_to(episode_dir))
 
         first_depth_keys = set(episode.frames[0].images_depth.keys())
@@ -574,10 +604,12 @@ def save_episode(episode: EpisodeBuffer, out_dir: Path) -> Path:
             depth_root = episode_dir / "images_depth"
             depth_root.mkdir(parents=True, exist_ok=True)
             for logical_name in sorted(first_depth_keys):
-                frames = np.stack([frame.images_depth[logical_name] for frame in episode.frames], axis=0)
+                frames = np.stack([frame.images_depth[logical_name]
+                                  for frame in episode.frames], axis=0)
                 file_path = depth_root / f"{logical_name}.npz"
-                np.savez_compressed(file_path, frames=frames)
-                depth_files[logical_name] = str(file_path.relative_to(episode_dir))
+                np.savez(file_path, frames=frames)
+                depth_files[logical_name] = str(
+                    file_path.relative_to(episode_dir))
 
     manifest = {
         "schema_version": EPISODE_SCHEMA_VERSION,
@@ -606,7 +638,8 @@ def save_episode(episode: EpisodeBuffer, out_dir: Path) -> Path:
 
 def load_episode(episode_dir: Path) -> EpisodeBuffer:
     episode_dir = Path(episode_dir)
-    manifest = json.loads((episode_dir / "episode.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (episode_dir / "episode.json").read_text(encoding="utf-8"))
     low_dim = np.load(episode_dir / manifest["files"]["low_dim"])
     images = {
         logical_name: np.load(episode_dir / rel_path)["frames"]
@@ -643,11 +676,16 @@ def load_episode(episode_dir: Path) -> EpisodeBuffer:
                 eef=np.asarray(low_dim["eef"][idx], dtype=np.float32),
                 action=np.asarray(low_dim["action"][idx], dtype=np.float32),
                 images={key: value[idx] for key, value in images.items()},
-                images_depth={key: value[idx] for key, value in images_depth.items()},
-                robot_base=np.asarray(low_dim["robot_base"][idx], dtype=np.float32) if "robot_base" in low_dim else None,
-                base_wheels=np.asarray(low_dim["base_wheels"][idx], dtype=np.float32) if "base_wheels" in low_dim else None,
-                base_velocity=np.asarray(low_dim["base_velocity"][idx], dtype=np.float32) if "base_velocity" in low_dim else None,
-                action_base=np.asarray(low_dim["action_base"][idx], dtype=np.float32) if "action_base" in low_dim else None,
+                images_depth={key: value[idx]
+                              for key, value in images_depth.items()},
+                robot_base=np.asarray(
+                    low_dim["robot_base"][idx], dtype=np.float32) if "robot_base" in low_dim else None,
+                base_wheels=np.asarray(
+                    low_dim["base_wheels"][idx], dtype=np.float32) if "base_wheels" in low_dim else None,
+                base_velocity=np.asarray(
+                    low_dim["base_velocity"][idx], dtype=np.float32) if "base_velocity" in low_dim else None,
+                action_base=np.asarray(
+                    low_dim["action_base"][idx], dtype=np.float32) if "action_base" in low_dim else None,
                 topic_stamps=dict(frame_meta.get("topic_stamps", {})),
             )
         )
@@ -727,7 +765,8 @@ class VRCommandMirror:
         from rclpy.node import Node
 
         if not rclpy.ok():
-            raise RuntimeError("rclpy must be initialized before creating VRCommandMirror")
+            raise RuntimeError(
+                "rclpy must be initialized before creating VRCommandMirror")
 
         self._lock = threading.Lock()
         self._latest_left = None
@@ -788,19 +827,24 @@ class DualVRCollector:
         self.include_camera = bool(include_camera)
         self.include_base = bool(include_base)
         self.action_kind = _normalize_action_kind(action_kind)
-        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_names = [
+            str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
         if self.include_camera:
-            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
-            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            env_cameras = set(str(name)
+                              for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [
+                name for name in self.camera_names if name not in env_cameras]
             if missing_cameras:
                 raise ValueError(
                     f"env.camera_view does not include requested cameras: {missing_cameras}"
                 )
             if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
-                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
-        self.vr_mirror = VRCommandMirror(left_topic=left_vr_topic, right_topic=right_vr_topic)
+                raise ValueError(
+                    "collect requested depth frames, but env.camera_type does not subscribe depth")
+        self.vr_mirror = VRCommandMirror(
+            left_topic=left_vr_topic, right_topic=right_vr_topic)
         self._odom_pose = np.zeros((3,), dtype=np.float32)
         self._last_odom_timestamp: Optional[float] = None
 
@@ -819,7 +863,8 @@ class DualVRCollector:
         if right_vr is None:
             missing.append("vr_right")
         if self.include_camera:
-            missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+            missing.extend(_camera_ready(
+                self.env, self.camera_names, self.camera_type))
         return len(missing) == 0, missing
 
     def wait_until_ready(self) -> None:
@@ -846,7 +891,8 @@ class DualVRCollector:
             target_size=self.img_size,
         )
         left_status = status.get("left") if isinstance(status, dict) else None
-        right_status = status.get("right") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(
+            status, dict) else None
         base_status = status.get("base") if isinstance(status, dict) else None
         if left_status is None or right_status is None:
             return None, "arm status not ready"
@@ -948,20 +994,25 @@ class DualArmGravityCollector:
         self.env = env
         self.include_camera = bool(include_camera)
         self.action_kind = str(action_kind)
-        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_names = [
+            str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
         if self.action_kind not in {"joint", "eef"}:
-            raise ValueError("dual-arm gravity collect only supports action_kind='joint' or 'eef'")
+            raise ValueError(
+                "dual-arm gravity collect only supports action_kind='joint' or 'eef'")
         if self.include_camera:
-            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
-            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            env_cameras = set(str(name)
+                              for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [
+                name for name in self.camera_names if name not in env_cameras]
             if missing_cameras:
                 raise ValueError(
                     f"env.camera_view does not include requested cameras: {missing_cameras}"
                 )
             if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
-                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+                raise ValueError(
+                    "collect requested depth frames, but env.camera_type does not subscribe depth")
 
     def wait_until_ready(self) -> None:
         last_report = 0.0
@@ -973,7 +1024,8 @@ class DualArmGravityCollector:
             if status.get("right") is None:
                 missing.append("right_arm_status")
             if self.include_camera:
-                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+                missing.extend(_camera_ready(
+                    self.env, self.camera_names, self.camera_type))
             if not missing:
                 return
             now = time.time()
@@ -985,7 +1037,8 @@ class DualArmGravityCollector:
     def prepare(self) -> None:
         success, error_message = self.env.set_special_mode(3, side="both")
         if not success:
-            raise RuntimeError(error_message or "Failed to enable gravity mode for both arms")
+            raise RuntimeError(
+                error_message or "Failed to enable gravity mode for both arms")
         time.sleep(0.2)
 
     def capture_frame(self, frame_idx: int) -> tuple[Optional[EpisodeFrame], Optional[str]]:
@@ -996,7 +1049,8 @@ class DualArmGravityCollector:
             target_size=self.img_size,
         )
         left_status = status.get("left") if isinstance(status, dict) else None
-        right_status = status.get("right") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(
+            status, dict) else None
         if left_status is None or right_status is None:
             return None, "arm status not ready"
 
@@ -1074,12 +1128,15 @@ class SingleArmMirrorCollector:
     ):
         self.env = env
         self.leader_side = leader_side
-        self.follow_side: Literal["left", "right"] = "right" if leader_side == "left" else "left"
+        self.follow_side: Literal["left",
+                                  "right"] = "right" if leader_side == "left" else "left"
         self.include_camera = bool(include_camera)
         self.action_kind = action_kind
         self.mirror = bool(mirror)
-        self.record_side: Literal["left", "right"] = self.follow_side if self.mirror else self.leader_side
-        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.record_side: Literal["left",
+                                  "right"] = self.follow_side if self.mirror else self.leader_side
+        self.camera_names = [
+            str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
         self.control_rate = float(control_rate)
@@ -1100,14 +1157,17 @@ class SingleArmMirrorCollector:
         if self.mirror and self.control_rate <= 0.0:
             raise ValueError("control_rate must be > 0 when mirror=True")
         if self.include_camera:
-            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
-            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            env_cameras = set(str(name)
+                              for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [
+                name for name in self.camera_names if name not in env_cameras]
             if missing_cameras:
                 raise ValueError(
                     f"env.camera_view does not include requested cameras: {missing_cameras}"
                 )
             if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
-                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+                raise ValueError(
+                    "collect requested depth frames, but env.camera_type does not subscribe depth")
 
     def wait_until_ready(self) -> None:
         last_report = 0.0
@@ -1119,7 +1179,8 @@ class SingleArmMirrorCollector:
             if status.get("right") is None:
                 missing.append("right_arm_status")
             if self.include_camera:
-                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+                missing.extend(_camera_ready(
+                    self.env, self.camera_names, self.camera_type))
             if not missing:
                 return
             now = time.time()
@@ -1143,7 +1204,8 @@ class SingleArmMirrorCollector:
         self.stop_control()
         self._control_stop.clear()
         self._control_once()
-        self._control_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._control_thread = threading.Thread(
+            target=self._control_loop, daemon=True)
         self._control_thread.start()
 
     def stop_control(self) -> None:
@@ -1160,30 +1222,32 @@ class SingleArmMirrorCollector:
 
     def _control_once(self) -> bool:
         status = self.env.get_robot_status()
-        leader_status = status.get(self.leader_side) if isinstance(status, dict) else None
-        follower_status = status.get(self.follow_side) if isinstance(status, dict) else None
+        leader_status = status.get(
+            self.leader_side) if isinstance(status, dict) else None
+        follower_status = status.get(
+            self.follow_side) if isinstance(status, dict) else None
         if leader_status is None or follower_status is None:
             return False
         if self.action_kind == "joint":
-            target = _smooth_target(
+            command = _smooth_target(
                 _arm_qpos(leader_status),
                 self._last_joint_target,
                 alpha=self.joint_lowpass_alpha,
                 deadband=self.joint_deadband,
             )
-            self._last_joint_target = target.copy()
-            self.env.step_raw_joint({self.follow_side: target})
+            self._last_joint_target = command.copy()
+            self.env.step_raw_joint({self.follow_side: command})
         else:
-            target = _smooth_target(
+            command = _smooth_target(
                 _arm_eef(leader_status),
                 self._last_eef_target,
                 alpha=self.eef_lowpass_alpha,
                 deadband=self.eef_deadband,
             )
-            self._last_eef_target = target.copy()
-            self.env.step_raw_eef({self.follow_side: target})
+            self._last_eef_target = command.copy()
+            self.env.step_raw_eef({self.follow_side: command})
         with self._control_lock:
-            self._latest_command = target.copy()
+            self._latest_command = command.copy()
         return True
 
     def _control_loop(self) -> None:
@@ -1214,8 +1278,10 @@ class SingleArmMirrorCollector:
             include_camera=self.include_camera,
             target_size=self.img_size,
         )
-        leader_status = status.get(self.leader_side) if isinstance(status, dict) else None
-        follower_status = status.get(self.follow_side) if isinstance(status, dict) else None
+        leader_status = status.get(
+            self.leader_side) if isinstance(status, dict) else None
+        follower_status = status.get(
+            self.follow_side) if isinstance(status, dict) else None
         if leader_status is None or follower_status is None:
             return None, "arm status not ready"
         record_status = follower_status if self.record_side == self.follow_side else leader_status
@@ -1289,7 +1355,8 @@ class SingleArmSpaceMouseCollector:
         self.env = env
         self.side: Literal["left", "right"] = side
         self.include_camera = bool(include_camera)
-        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_names = [
+            str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
         self.control_rate = float(control_rate)
@@ -1299,20 +1366,26 @@ class SingleArmSpaceMouseCollector:
         self.translation_deadzone = float(translation_deadzone)
         self.rotation_deadzone = float(rotation_deadzone)
         self.response_exponent = float(response_exponent)
-        self.translation_axis_signs = _normalize_axis_signs(translation_axis_signs, 3, "translation_axis_signs")
-        self.rotation_axis_signs = _normalize_axis_signs(rotation_axis_signs, 3, "rotation_axis_signs")
+        self.translation_axis_signs = _normalize_axis_signs(
+            translation_axis_signs, 3, "translation_axis_signs")
+        self.rotation_axis_signs = _normalize_axis_signs(
+            rotation_axis_signs, 3, "rotation_axis_signs")
         self.spacemouse = SpaceMouseDevice()
         self._latest_command: Optional[np.ndarray] = None
         self._control_lock = threading.Lock()
         self._control_thread: Optional[threading.Thread] = None
         self._control_stop = threading.Event()
         if self.include_camera:
-            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
-            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            env_cameras = set(str(name)
+                              for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [
+                name for name in self.camera_names if name not in env_cameras]
             if missing_cameras:
-                raise ValueError(f"env.camera_view does not include requested cameras: {missing_cameras}")
+                raise ValueError(
+                    f"env.camera_view does not include requested cameras: {missing_cameras}")
             if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
-                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+                raise ValueError(
+                    "collect requested depth frames, but env.camera_type does not subscribe depth")
 
     def wait_until_ready(self) -> None:
         last_report = 0.0
@@ -1322,7 +1395,8 @@ class SingleArmSpaceMouseCollector:
             if status.get(self.side) is None:
                 missing.append(f"{self.side}_arm_status")
             if self.include_camera:
-                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+                missing.extend(_camera_ready(
+                    self.env, self.camera_names, self.camera_type))
             if not missing:
                 return
             now = time.time()
@@ -1340,7 +1414,8 @@ class SingleArmSpaceMouseCollector:
     def start_control(self) -> None:
         self.stop_control()
         self._control_stop.clear()
-        self._control_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._control_thread = threading.Thread(
+            target=self._control_loop, daemon=True)
         self._control_thread.start()
 
     def stop_control(self) -> None:
@@ -1379,14 +1454,17 @@ class SingleArmSpaceMouseCollector:
 
     def _control_once(self, dt: float) -> bool:
         status = self.env.get_robot_status()
-        arm_status = status.get(self.side) if isinstance(status, dict) else None
+        arm_status = status.get(self.side) if isinstance(
+            status, dict) else None
         if arm_status is None:
             return False
         sample = self.spacemouse.read()
-        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(sample, dt)
+        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(
+            sample, dt)
         if not _effective_motion(delta_xyz, delta_rpy, gripper_delta):
             return True
-        target = _compose_eef_target(_arm_eef(arm_status), delta_xyz, delta_rpy, gripper_delta)
+        target = _compose_eef_target(
+            _arm_eef(arm_status), delta_xyz, delta_rpy, gripper_delta)
         self.env.step_raw_eef({self.side: target})
         with self._control_lock:
             self._latest_command = target.copy()
@@ -1406,7 +1484,8 @@ class SingleArmSpaceMouseCollector:
                 if not ok:
                     report_t = time.time()
                     if report_t - last_error_report > 1.0:
-                        print(f"SpaceMouse control waiting for {self.side} arm status.")
+                        print(
+                            f"SpaceMouse control waiting for {self.side} arm status.")
                         last_error_report = report_t
             except Exception as exc:
                 report_t = time.time()
@@ -1424,7 +1503,8 @@ class SingleArmSpaceMouseCollector:
             include_camera=self.include_camera,
             target_size=self.img_size,
         )
-        arm_status = status.get(self.side) if isinstance(status, dict) else None
+        arm_status = status.get(self.side) if isinstance(
+            status, dict) else None
         if arm_status is None:
             return None, f"{self.side} arm status not ready"
 
@@ -1459,8 +1539,10 @@ class SingleArmSpaceMouseCollector:
             images_depth=depth_frames if self.include_camera else {},
             topic_stamps=_build_topic_stamps(
                 self.env,
-                left_status=status.get("left") if isinstance(status, dict) else None,
-                right_status=status.get("right") if isinstance(status, dict) else None,
+                left_status=status.get("left") if isinstance(
+                    status, dict) else None,
+                right_status=status.get("right") if isinstance(
+                    status, dict) else None,
             ),
         ), None
 
@@ -1494,7 +1576,8 @@ class DualArmSpaceMouseCollector:
             raise ValueError("initial_active_side must be 'left' or 'right'")
         self.env = env
         self.include_camera = bool(include_camera)
-        self.camera_names = [str(name) for name in camera_names] if self.include_camera else []
+        self.camera_names = [
+            str(name) for name in camera_names] if self.include_camera else []
         self.camera_type = "all" if use_depth else "color"
         self.img_size = tuple(img_size)
         self.control_rate = float(control_rate)
@@ -1504,23 +1587,31 @@ class DualArmSpaceMouseCollector:
         self.translation_deadzone = float(translation_deadzone)
         self.rotation_deadzone = float(rotation_deadzone)
         self.response_exponent = float(response_exponent)
-        self.translation_axis_signs = _normalize_axis_signs(translation_axis_signs, 3, "translation_axis_signs")
-        self.rotation_axis_signs = _normalize_axis_signs(rotation_axis_signs, 3, "rotation_axis_signs")
-        self.initial_active_side: Literal["left", "right"] = initial_active_side
+        self.translation_axis_signs = _normalize_axis_signs(
+            translation_axis_signs, 3, "translation_axis_signs")
+        self.rotation_axis_signs = _normalize_axis_signs(
+            rotation_axis_signs, 3, "rotation_axis_signs")
+        self.initial_active_side: Literal["left",
+                                          "right"] = initial_active_side
         self._active_side: Literal["left", "right"] = initial_active_side
         self._last_buttons: tuple[bool, bool] = (False, False)
         self.spacemouse = SpaceMouseDevice()
-        self._latest_commands: Dict[str, Optional[np.ndarray]] = {"left": None, "right": None}
+        self._latest_commands: Dict[str, Optional[np.ndarray]] = {
+            "left": None, "right": None}
         self._control_lock = threading.Lock()
         self._control_thread: Optional[threading.Thread] = None
         self._control_stop = threading.Event()
         if self.include_camera:
-            env_cameras = set(str(name) for name in getattr(self.env, "camera_view", ()))
-            missing_cameras = [name for name in self.camera_names if name not in env_cameras]
+            env_cameras = set(str(name)
+                              for name in getattr(self.env, "camera_view", ()))
+            missing_cameras = [
+                name for name in self.camera_names if name not in env_cameras]
             if missing_cameras:
-                raise ValueError(f"env.camera_view does not include requested cameras: {missing_cameras}")
+                raise ValueError(
+                    f"env.camera_view does not include requested cameras: {missing_cameras}")
             if use_depth and getattr(self.env, "camera_type", "color") not in {"all", "depth"}:
-                raise ValueError("collect requested depth frames, but env.camera_type does not subscribe depth")
+                raise ValueError(
+                    "collect requested depth frames, but env.camera_type does not subscribe depth")
 
     @property
     def active_side(self) -> Literal["left", "right"]:
@@ -1536,7 +1627,8 @@ class DualArmSpaceMouseCollector:
             if status.get("right") is None:
                 missing.append("right_arm_status")
             if self.include_camera:
-                missing.extend(_camera_ready(self.env, self.camera_names, self.camera_type))
+                missing.extend(_camera_ready(
+                    self.env, self.camera_names, self.camera_type))
             if not missing:
                 return
             now = time.time()
@@ -1561,7 +1653,8 @@ class DualArmSpaceMouseCollector:
     def start_control(self) -> None:
         self.stop_control()
         self._control_stop.clear()
-        self._control_thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._control_thread = threading.Thread(
+            target=self._control_loop, daemon=True)
         self._control_thread.start()
 
     def stop_control(self) -> None:
@@ -1609,7 +1702,8 @@ class DualArmSpaceMouseCollector:
     def _control_once(self, dt: float) -> bool:
         status = self.env.get_robot_status()
         left_status = status.get("left") if isinstance(status, dict) else None
-        right_status = status.get("right") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(
+            status, dict) else None
         if left_status is None or right_status is None:
             return False
 
@@ -1623,12 +1717,14 @@ class DualArmSpaceMouseCollector:
                     self._latest_commands[side] = current_eef[side].copy()
 
         sample = self.spacemouse.read()
-        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(sample, dt)
+        delta_xyz, delta_rpy, gripper_delta = self._motion_from_sample(
+            sample, dt)
         if not _effective_motion(delta_xyz, delta_rpy, gripper_delta):
             return True
 
         active_side = self._active_side
-        target = _compose_eef_target(current_eef[active_side], delta_xyz, delta_rpy, gripper_delta)
+        target = _compose_eef_target(
+            current_eef[active_side], delta_xyz, delta_rpy, gripper_delta)
         self.env.step_raw_eef({active_side: target})
         with self._control_lock:
             self._latest_commands[active_side] = target.copy()
@@ -1667,7 +1763,8 @@ class DualArmSpaceMouseCollector:
             target_size=self.img_size,
         )
         left_status = status.get("left") if isinstance(status, dict) else None
-        right_status = status.get("right") if isinstance(status, dict) else None
+        right_status = status.get("right") if isinstance(
+            status, dict) else None
         if left_status is None or right_status is None:
             return None, "arm status not ready"
 
@@ -1691,8 +1788,10 @@ class DualArmSpaceMouseCollector:
         left_eef = _arm_eef(left_status)
         right_eef = _arm_eef(right_status)
         command_snapshot = self._command_snapshot()
-        left_action = command_snapshot["left"] if command_snapshot["left"] is not None else left_eef.copy()
-        right_action = command_snapshot["right"] if command_snapshot["right"] is not None else right_eef.copy()
+        left_action = command_snapshot["left"] if command_snapshot["left"] is not None else left_eef.copy(
+        )
+        right_action = command_snapshot["right"] if command_snapshot["right"] is not None else right_eef.copy(
+        )
 
         return EpisodeFrame(
             frame_idx=int(frame_idx),
@@ -1701,7 +1800,8 @@ class DualArmSpaceMouseCollector:
             qvel=np.concatenate([left_qvel, right_qvel], axis=0),
             effort=np.concatenate([left_effort, right_effort], axis=0),
             eef=np.concatenate([left_eef, right_eef], axis=0),
-            action=np.concatenate([left_action, right_action], axis=0).astype(np.float32),
+            action=np.concatenate(
+                [left_action, right_action], axis=0).astype(np.float32),
             images=color_frames if self.include_camera else {},
             images_depth=depth_frames if self.include_camera else {},
             topic_stamps=_build_topic_stamps(

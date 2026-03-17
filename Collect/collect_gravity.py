@@ -14,7 +14,7 @@ try:
         save_episode,
     )
 except ImportError:  # pragma: no cover
-    from .collect_utils import (
+    from collect_utils import (
         ARXRobotEnv,
         DualArmGravityCollector,
         SingleArmMirrorCollector,
@@ -36,27 +36,27 @@ def collect_gravity_episode(
     env: ARXRobotEnv,
     arm_mode: str = "single",
     out_dir: Path | str = "episodes_raw",
-    frame_rate: float = 15.0,
+    frame_rate: float = 20.0,
     max_frames: int = 0,
     max_episodes: int = 0,
     action_kind: str = "joint",
     camera_names: tuple[str, ...] = ("camera_h",),
     with_depth: bool = False,
     img_size: tuple[int, int] = (640, 480),
-    task: str = "",
+    task: str = "stack the two paper cups on top of the paper cup closest to the shelf one by one and place the stacked cups on the shelf",
     leader_side: str = "left",
     mirror: bool = True,
-    control_rate: float = 60.0,
-    joint_lowpass_alpha: float = 0.2,
-    joint_deadband: float | tuple[float, ...] = 0.004,
-    eef_lowpass_alpha: float = 0.25,
+    control_rate: float = 35.0,
+    joint_lowpass_alpha: float = 1.0,
+    joint_deadband: float | tuple[float, ...] = 0.0,
+    eef_lowpass_alpha: float = 0.20,
     eef_deadband: float | tuple[float, ...] = (
-        0.001,
-        0.001,
-        0.001,
-        0.01,
-        0.01,
-        0.01,
+        0.0012,
+        0.0012,
+        0.0012,
+        0.012,
+        0.012,
+        0.012,
         0.02,
     ),
 ) -> Path | None:
@@ -177,7 +177,8 @@ def collect_gravity_episode(
                 continue
 
             while True:
-                save_choice = input("Save episode? [y] save / [n] discard / [q] quit: ").strip().lower()
+                save_choice = input(
+                    "Save episode? [y] save / [n] discard / [q] quit: ").strip().lower()
                 if save_choice in {"", "y"}:
                     episode_dir = save_episode(episode, out_dir)
                     print(f"Saved episode to {episode_dir}")
@@ -200,19 +201,51 @@ def collect_gravity_episode(
 
 
 def main() -> None:
-    env = ARXRobotEnv(camera_type="color", camera_view=("camera_h",), dir=None, video=False, img_size=(640, 480))
+    env = ARXRobotEnv(camera_type="color", camera_view=(
+        "camera_h", "camera_l", "camera_r"), dir=None, video=False, img_size=(640, 480))
     try:
+        env.reset()
+        env.step_lift(14.5)
         collect_gravity_episode(
             env,
             arm_mode="single",
             out_dir="episodes_raw/gravity_single",
-            frame_rate=15.0,
+            frame_rate=20.0,
+            max_frames=0,
+            max_episodes=0,
             action_kind="joint",
-            camera_names=("camera_h",),
+            camera_names=("camera_h", "camera_l", "camera_r"),
+            with_depth=False,
+            img_size=(640, 480),
+            task="",
             leader_side="left",
             mirror=True,
+            control_rate=35.0,
+            joint_lowpass_alpha=1.0,
+            joint_deadband=0.0,
+            eef_lowpass_alpha=0.2,
+            eef_deadband=(0.0012, 0.0012, 0.0012, 0.012, 0.012, 0.012, 0.02),
         )
-        # collect_gravity_episode(env, arm_mode="dual", out_dir="episodes_raw/gravity_dual")
+        # collect_gravity_episode(
+        #     env,
+        #     arm_mode="dual",
+        #     out_dir="episodes_raw/gravity_dual",
+        #     frame_rate=20.0,
+        #     max_frames=0,
+        #     max_episodes=0,
+        #     action_kind="joint",
+        #     camera_names=("camera_h",),
+        #     with_depth=False,
+        #     img_size=(640, 480),
+        #     task="",
+        #     leader_side="left",
+        #     mirror=True,
+        #     control_rate=35.0,
+        #     joint_lowpass_alpha=1.0,
+        #     joint_deadband=0.0,
+        #     eef_lowpass_alpha=0.20,
+        #     eef_deadband=(0.0012, 0.0012, 0.0012, 0.012, 0.012, 0.012, 0.02),
+        # )
     finally:
         env.close()
 

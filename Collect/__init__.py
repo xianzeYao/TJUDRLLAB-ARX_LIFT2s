@@ -1,2 +1,0 @@
-"""ARX VR collection toolchain."""
-

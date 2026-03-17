@@ -2,12 +2,16 @@
 
 当前 `Collect/` 目录主要保留这些采集/重放入口：
 
-- `collect_vr.py`
-  - `collect_vr_episode(..., arm_mode="single" | "dual")`
-- `collect_3dmouse.py`
-  - `collect_3dmouse_episode(..., arm_mode="single" | "dual")`
-- `collect_gravity.py`
-  - `collect_gravity_episode(..., arm_mode="single" | "dual")`
+- `collect_vr_two_arms.py`
+  - 双臂 VR 采集
+- `collect_3dmouse_two_arms.py`
+  - 双臂 3D mouse 采集
+  - 单个 3D mouse 控当前激活手臂
+- `collect_3dmouse_one_arm.py`
+  - 单臂 3D mouse 采集
+- `collect_one_arm.py`
+  - 单臂拖动采集
+  - 选中的手进入重力模式，另一只手按频率跟随
 - `replay.py`
   - 重放采集好的 episode
 
@@ -22,53 +26,49 @@
 
 ## 最常用函数
 
-### VR 采集
+### 双臂 VR 采集
 
 ```python
-from Collect.collect_vr import collect_vr_episode
+from Collect.collect_vr_two_arms import collect_vr_two_arms_episode
 
-collect_vr_episode(
-    env,
-    arm_mode="dual",
-    out_dir="episodes_raw/vr_upper_only",
-    camera_names=("camera_h", "camera_l", "camera_r"),
+collect_vr_two_arms_episode(
+    out_dir="episodes_raw",
+    camera_names=("camera_h",),
+    include_camera=True,
+    include_base=True,
     action_kind="joint",
-    frame_rate=15.0,
-    include_base=False,
+    frame_rate=20.0,
 )
 ```
 
-### 重力采集
+### 单臂采集
 
 ```python
-from Collect.collect_gravity import collect_gravity_episode
+from Collect.collect_one_arm import collect_one_arm_episode
 
-collect_gravity_episode(
-    env,
-    arm_mode="single",
+collect_one_arm_episode(
     leader_side="left",
     out_dir="episodes_raw",
     action_kind="joint",
-    frame_rate=15.0,
+    frame_rate=20.0,
     mirror=True,
 )
 ```
 
-### 3D Mouse 采集
+### 单臂 3D mouse 采集
 
 依赖：
 
 - 需要额外安装 `pyspacemouse`
 
 ```python
-from Collect.collect_3dmouse import collect_3dmouse_episode
+from Collect.collect_3dmouse_one_arm import collect_3dmouse_one_arm_episode
 
-collect_3dmouse_episode(
+collect_3dmouse_one_arm_episode(
     env,
-    arm_mode="single",
-    leader_side="left",
+    side="left",
     out_dir="episodes_raw",
-    frame_rate=15.0,
+    frame_rate=20.0,
     control_rate=60.0,
     task="pick up cup",
 )
@@ -78,6 +78,20 @@ collect_3dmouse_episode(
 
 - `button0`: 夹爪收紧
 - `button1`: 夹爪张开
+
+### 双臂 3D mouse 采集
+
+```python
+from Collect.collect_3dmouse_two_arms import collect_3dmouse_two_arms_episode
+
+collect_3dmouse_two_arms_episode(
+    env,
+    out_dir="episodes_raw",
+    frame_rate=20.0,
+    control_rate=60.0,
+    task="dual handover",
+)
+```
 
 默认按键：
 
