@@ -499,13 +499,13 @@ def main() -> None:
         max_move_duration = 8
         result = search_shelf(
             arx=arx,
-            object_prompt="a yellow glue",
+            object_prompt="a brown horse",
             v=v,
             check_interval=0.2,
             max_move_duration=max_move_duration,
             drop_height=13.0,
             max_layer=2,
-            center_region_ratio=0.3,
+            center_region_ratio=0.35,
             debug_raw=False,
             debug_pick_place=False,
             depth_median_n=5,
@@ -522,16 +522,22 @@ def main() -> None:
         arx.step_lift(14.0)
         step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
         # 抬高一点靠近桌子
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=0.8)
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=1.1)
         single_arm_pick_place(
             arx=arx,
             pick_prompt="",
             place_prompt="the center part of square plate",
             arm_side=result.arm_used,
             item_type="cup",
-            debug=True,
+            debug=False,
             depth_median_n=5,
         )
+        arx.set_special_mode(1)
+        # 回来
+        step_base_duration(arx, -0.6, 0.0, 0.0, duration=1.1)
+        step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
+        step_base_duration(arx, 0.6, 0.0, 0.0, duration=20)
+        arx.step_lift(0.0)
     finally:
         arx.close()
 
