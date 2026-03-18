@@ -539,70 +539,81 @@ convert_collect_to_lerobot(
 推荐流程：
 
 1. 先本地转换
-2. 再登录 Hugging Face
-3. 创建 dataset repo
+2. 先检查当前登录账号
+3. 如果账号不对，就重新登录或切换
 4. 上传整个转换结果目录
 
-Python 方式示例：
-
-```python
-from huggingface_hub import HfApi
-
-api = HfApi()
-repo_id = "tjudrllab/gravity_single"
-
-api.create_repo(
-    repo_id=repo_id,
-    repo_type="dataset",
-    exist_ok=True,
-)
-
-api.upload_folder(
-    repo_id=repo_id,
-    repo_type="dataset",
-    folder_path="lerobot_v3/gravity_single",
-    path_in_repo="",
-)
-```
-
-命令行准备：
+命令行推荐流程：
 
 ```bash
-huggingface-cli login
+# 1) 先确认当前是谁
+hf auth whoami
+
+# 2) 如果当前不是目标账号，就强制重新登录
+hf auth login --force
+
+# 3) 上传整个转换后的目录
+hf upload-large-folder \
+  yaoxianze/gravity_single4IL \
+  /Users/yxz/Documents/Code/Python/Robotbase_yxz/TJUDRLLAB-ARX_LIFT2s/Collect/lerobot_v3/gravity_single4IL \
+  --repo-type dataset
 ```
 
-如果你想把前面的“转换”和“上传”连起来，完整流程通常是：
+注意：
 
-```python
-from convert_lerobot import convert_collect_to_lerobot
-from huggingface_hub import HfApi
+- 续行符 `\` 后面不要再带空格
+- `repo_id` 一般写成 `用户名/数据集名`
+- `--repo-type dataset` 这里不能漏
 
-output_dir = convert_collect_to_lerobot(
-    episodes_root="episodes_raw/gravity_single",
-    output_root="lerobot_v3/gravity_single",
-    repo_id="tjudrllab/gravity_single",
-    target_version="v3.0",
-)
+常见变体：
 
-api = HfApi()
-api.create_repo(
-    repo_id="tjudrllab/gravity_single",
-    repo_type="dataset",
-    exist_ok=True,
-)
-api.upload_folder(
-    repo_id="tjudrllab/gravity_single",
-    repo_type="dataset",
-    folder_path=str(output_dir),
-    path_in_repo="",
-)
+```bash
+hf upload-large-folder \
+  yaoxianze/gravity_dual \
+  /Users/yxz/Documents/Code/Python/Robotbase_yxz/TJUDRLLAB-ARX_LIFT2s/Collect/lerobot_v3/gravity_dual \
+  --repo-type dataset
+
+hf upload-large-folder \
+  yaoxianze/vr_dual \
+  /Users/yxz/Documents/Code/Python/Robotbase_yxz/TJUDRLLAB-ARX_LIFT2s/Collect/lerobot_v3/vr_dual \
+  --repo-type dataset
+
+hf upload-large-folder \
+  yaoxianze/3dmouse_single \
+  /Users/yxz/Documents/Code/Python/Robotbase_yxz/TJUDRLLAB-ARX_LIFT2s/Collect/lerobot_v3/3dmouse_single \
+  --repo-type dataset
 ```
+
+如果目录不大，也可以用普通上传：
+
+```bash
+hf upload \
+  yaoxianze/gravity_single4IL \
+  /Users/yxz/Documents/Code/Python/Robotbase_yxz/TJUDRLLAB-ARX_LIFT2s/Collect/lerobot_v3/gravity_single4IL \
+  . \
+  --repo-type dataset
+```
+
+`hf upload-large-folder` 和 `hf upload` 的区别：
+
+- `hf upload` 更适合普通目录上传，功能更全
+- `hf upload-large-folder` 更适合大目录、大文件、多文件上传
+- `hf upload-large-folder` 支持断点续传，上传中断后更容易恢复
+- `hf upload-large-folder` 会把上传拆成很多小任务，并做多线程处理
+- `hf upload-large-folder` 通常会产生多个 commit，不是一次单独提交
+- `hf upload` 支持自定义 `path_in_repo`
+- `hf upload` 支持更灵活的单次提交行为
+- `hf upload-large-folder` 反而更稳，但功能没那么全
+
+实际建议：
+
+- 目录小、文件少时，用 `hf upload`
+- 目录大、担心网络中断时，用 `hf upload-large-folder`
 
 补充说明：
 
-- `repo_id` 一般写成 `用户名/数据集名`
-- `repo_type` 这里要用 `dataset`
-- 如果仓库已存在，`exist_ok=True` 就不会因为重复创建报错
+- 如果 `hf auth whoami` 显示的账号已经对了，就不用重复登录
+- 如果你是通过环境变量 `HF_TOKEN` 登录的，切账号时要先处理这个环境变量
 - 一般上传 `convert_collect_to_lerobot(...)` 生成出来的整个目录即可
 
 ## 12. 一个更底层的自定义模板
