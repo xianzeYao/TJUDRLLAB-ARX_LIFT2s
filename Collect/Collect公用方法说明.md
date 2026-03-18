@@ -525,7 +525,87 @@ convert_collect_to_lerobot(
 - `include_depth_images`：是否导出深度图
 - `max_episodes`：最多转换多少个 episode
 
-## 11. 一个更底层的自定义模板
+## 11. 上传到 Hugging Face 方法
+
+通常建议上传转换后的目录，也就是：
+
+- `lerobot_v3/gravity_single`
+- `lerobot_v3/gravity_dual`
+- `lerobot_v3/vr_dual`
+- `lerobot_v3/3dmouse_single`
+
+不建议优先上传 `episodes_raw/...`，因为训练或可视化一般更直接使用转换后的 LeRobot 数据目录。
+
+推荐流程：
+
+1. 先本地转换
+2. 再登录 Hugging Face
+3. 创建 dataset repo
+4. 上传整个转换结果目录
+
+Python 方式示例：
+
+```python
+from huggingface_hub import HfApi
+
+api = HfApi()
+repo_id = "tjudrllab/gravity_single"
+
+api.create_repo(
+    repo_id=repo_id,
+    repo_type="dataset",
+    exist_ok=True,
+)
+
+api.upload_folder(
+    repo_id=repo_id,
+    repo_type="dataset",
+    folder_path="lerobot_v3/gravity_single",
+    path_in_repo="",
+)
+```
+
+命令行准备：
+
+```bash
+huggingface-cli login
+```
+
+如果你想把前面的“转换”和“上传”连起来，完整流程通常是：
+
+```python
+from convert_lerobot import convert_collect_to_lerobot
+from huggingface_hub import HfApi
+
+output_dir = convert_collect_to_lerobot(
+    episodes_root="episodes_raw/gravity_single",
+    output_root="lerobot_v3/gravity_single",
+    repo_id="tjudrllab/gravity_single",
+    target_version="v3.0",
+)
+
+api = HfApi()
+api.create_repo(
+    repo_id="tjudrllab/gravity_single",
+    repo_type="dataset",
+    exist_ok=True,
+)
+api.upload_folder(
+    repo_id="tjudrllab/gravity_single",
+    repo_type="dataset",
+    folder_path=str(output_dir),
+    path_in_repo="",
+)
+```
+
+补充说明：
+
+- `repo_id` 一般写成 `用户名/数据集名`
+- `repo_type` 这里要用 `dataset`
+- 如果仓库已存在，`exist_ok=True` 就不会因为重复创建报错
+- 一般上传 `convert_collect_to_lerobot(...)` 生成出来的整个目录即可
+
+## 12. 一个更底层的自定义模板
 
 如果你不想直接用 `collect_gravity_episode(...)` 这种高层封装，也可以自己写：
 
@@ -602,7 +682,7 @@ def main():
             env.close()
 ```
 
-## 12. 使用建议
+## 13. 使用建议
 
 - 高层采集优先直接用 `collect_gravity_episode`、`collect_vr_episode`、`collect_3dmouse_episode`
 - 只有在你要改采样逻辑时，再直接下钻到 `collect_utils.py`
@@ -612,7 +692,7 @@ def main():
 - 自定义采集时，务必区分单臂 `7` 维和双臂 `14` 维
 - 回放和转换前，先确认 episode 目录确实完整
 
-## 13. 一句话总结
+## 14. 一句话总结
 
 `Collect` 层最推荐的使用方式就是：
 
