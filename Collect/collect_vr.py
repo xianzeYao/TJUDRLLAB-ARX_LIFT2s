@@ -175,6 +175,7 @@ def collect_vr_episode(
                     return last_saved_episode
                 continue
 
+            env.set_special_mode(1)
             while True:
                 save_choice = input("Save episode? [y] save / [n] discard / [q] quit: ").strip().lower()
                 if save_choice in {"", "y"}:

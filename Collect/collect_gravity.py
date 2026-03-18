@@ -43,7 +43,7 @@ def collect_gravity_episode(
     camera_names: tuple[str, ...] = ("camera_h",),
     with_depth: bool = False,
     img_size: tuple[int, int] = (640, 480),
-    task: str = "stack the two paper cups on top of the paper cup closest to the shelf one by one and place the stacked cups on the shelf",
+    task: str = "",
     leader_side: str = "left",
     mirror: bool = True,
     control_rate: float = 35.0,
@@ -166,6 +166,7 @@ def collect_gravity_episode(
                     max_frames=max_frames,
                     prompt_start=False,
                 )
+
             finally:
                 if arm_mode == "single":
                     collector.stop_control()
@@ -175,7 +176,7 @@ def collect_gravity_episode(
                 if quit_requested:
                     return last_saved_episode
                 continue
-
+            env.set_special_mode(1)
             while True:
                 save_choice = input(
                     "Save episode? [y] save / [n] discard / [q] quit: ").strip().lower()
@@ -217,7 +218,7 @@ def main() -> None:
             camera_names=("camera_h", "camera_l", "camera_r"),
             with_depth=False,
             img_size=(640, 480),
-            task="",
+            task="stack the two paper cups on top of the paper cup closest to the shelf one by one and place the stacked cups on the shelf",
             leader_side="left",
             mirror=True,
             control_rate=35.0,
