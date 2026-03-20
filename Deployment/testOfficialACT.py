@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Official-style ACT deployment helper for ARX."""
+
+from __future__ import annotations
+
+import sys
+import time
+from pathlib import Path
+
+import torch
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+DEPLOYMENT_ROOT = Path(__file__).resolve().parent
+if str(DEPLOYMENT_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEPLOYMENT_ROOT))
+ROS2_ROOT = REPO_ROOT / "ARX_Realenv" / "ROS2"
+if str(ROS2_ROOT) not in sys.path:
+    sys.path.insert(0, str(ROS2_ROOT))
+
+from arx_ros2_env import ARXRobotEnv  # noqa: E402
+from deployment_utils import (  # noqa: E402
+    build_control_payload,
+    build_policy_observation,
+    infer_action_dim,
+    infer_visual_feature_keys,
+    resolve_pretrained_model_path,
+    unwrap_action_sequence,
+)
+
+
+def _import_act_policy():
+    try:
+        from lerobot.policies.act.modeling_act import ACTPolicy
+    except ImportError:
+        from lerobot.policies.act import ACTPolicy
+    return ACTPolicy
+
+
+def load_act_policy(model_path: str, device: str = "cuda"):
+    from lerobot.policies.factory import make_pre_post_processors
+
+    torch_device = torch.device(device if torch.cuda.is_available() else "cpu")
+    resolved_model_path = resolve_pretrained_model_path(model_path)
+    ACTPolicy = _import_act_policy()
+    policy = ACTPolicy.from_pretrained(
+        resolved_model_path).to(torch_device).eval()
+    preprocess, postprocess = make_pre_post_processors(
+        policy.config,
+        resolved_model_path,
+        preprocessor_overrides={
+            "device_processor": {"device": str(torch_device)}},
+    )
+    rgb_camera_keys, depth_camera_keys = infer_visual_feature_keys(policy)
+    action_dim = infer_action_dim(policy)
+    return policy, preprocess, postprocess, rgb_camera_keys, depth_camera_keys, action_dim
+
+
+def run_official_act(
+    arx: ARXRobotEnv,
+    model_path: str,
+    arm_side: str = "right",
+    hz: float = 10.0,
+    max_steps: int = 0,
+    device: str = "cuda",
+    dry_run: bool = False,
+):
+    """Run ACT with the official single-step `select_action()` logic."""
+    policy, preprocess, postprocess, rgb_camera_keys, depth_camera_keys, action_dim = load_act_policy(
+        model_path,
+        device=device,
+    )
+    policy.reset()
+
+    print(
+        f"Official ACT deployment started: side={arm_side}, "
+        f"rgb_cameras={rgb_camera_keys}, depth_cameras={depth_camera_keys}, "
+        f"action_dim={action_dim}, n_action_steps={policy.config.n_action_steps}, "
+        f"temporal_ensemble_coeff={policy.config.temporal_ensemble_coeff}, "
+        f"hz={hz:.2f}, dry_run={dry_run}"
+    )
+
+    step_idx = 0
+    period = 1.0 / max(hz, 1e-6)
+
+    while max_steps <= 0 or step_idx < max_steps:
+        t0 = time.perf_counter()
+        frames, status = arx.get_camera(
+            save_dir=None,
+            video=False,
+            target_size=arx.img_size,
+            return_status=True,
+        )
+        payload = build_policy_observation(
+            policy,
+            frames,
+            status,
+            arm_side=arm_side,
+        )
+        batch = preprocess(dict(payload))
+        with torch.inference_mode():
+            action = policy.select_action(batch)
+            action = postprocess(action)
+
+        step_action = unwrap_action_sequence(
+            action,
+            action_dim=action_dim,
+            max_action_steps=1,
+        )[0]
+        control_payload = build_control_payload(step_action, arm_side)
+
+        if dry_run:
+            print(f"[step {step_idx:05d}] action={step_action.round(4)}")
+        else:
+            arx.step_smooth_joint(control_payload)
+
+        elapsed = time.perf_counter() - t0
+        time.sleep(max(0.0, period - elapsed))
+        step_idx += 1
+
+
+def main() -> None:
+    arx = ARXRobotEnv(
+        duration_per_step=1.0 / 20.0,
+        min_steps=20,
+        max_v_xyz=0.25,
+        max_a_xyz=0.20,
+        max_v_rpy=0.3,
+        max_a_rpy=1.00,
+        camera_type="all",
+        camera_view=("camera_h", "camera_r"),
+        img_size=(640, 480),
+    )
+    try:
+        arx.reset()
+        arx.step_lift(14.5)
+        run_official_act(
+            arx=arx,
+            model_path="/home/arx/Arx_Lift2s/Deployment/models/act_joint_30k",
+            arm_side="right",
+            hz=10.0,
+            max_steps=500,
+            dry_run=False,
+        )
+    finally:
+        arx.close()
+
+
+if __name__ == "__main__":
+    main()
