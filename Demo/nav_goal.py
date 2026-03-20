@@ -13,7 +13,7 @@ sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
 from arx_pointing import predict_multi_points_from_rgb
 from arx_ros2_env import ARXRobotEnv
-from demo_utils import step_base_duration
+from demo_utils import estimate_lift_from_goal_z, step_base_duration
 from nav_utils import path_to_actions
 from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
 
@@ -76,11 +76,11 @@ def _vote_goal_presence(
     return true_count > false_count
 
 
-def _select_goal_point(points, depth):
+def _select_goal_point(points, depth, offset: float = 0.5):
     valid_goals = []
     for point in points:
         goal_pw = pixel_to_base_point_safe(
-            point, depth, robot_part="center", offset=[0.0, 0.5, 0.0])
+            point, depth, robot_part="center", offset=[0.0, offset, 0.0])
         if goal_pw is None:
             u, v = int(round(point[0])), int(round(point[1]))
             print(f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新")
@@ -167,6 +167,9 @@ def nav_to_goal(
     arx: ARXRobotEnv,
     goal: str = "white paper balls",
     distance: float = 0.55,
+    lift_height: float = 0.0,
+    offset: float = 0.5,
+    use_goal_z_for_lift: bool = False,
     continuous: bool = False,
     debug_raw: bool = False,
     depth_median_n: int = 5,
@@ -176,7 +179,7 @@ def nav_to_goal(
     last_result = None
 
     try:
-        arx.step_lift(5.0)
+        arx.step_lift(lift_height)
         while True:
             key = _get_key_nonblock()
             if key == "q":
@@ -224,7 +227,11 @@ def nav_to_goal(
                 return None
 
             try:
-                goal_pixel, goal_pw = _select_goal_point(points, depth)
+                goal_pixel, goal_pw = _select_goal_point(
+                    points,
+                    depth,
+                    offset=offset,
+                )
             except ValueError as exc:
                 print(exc)
                 if continuous:
@@ -245,6 +252,21 @@ def nav_to_goal(
                     continue
 
             _execute_nav_actions(arx, actions, distance=distance)
+            if use_goal_z_for_lift:
+                base_status = arx.get_robot_status().get("base")
+                current_lift = float(
+                    base_status.height) if base_status is not None else float(lift_height)
+                estimated_lift = estimate_lift_from_goal_z(
+                    goal_z=float(goal_pw[2]),
+                    current_lift=current_lift,
+                    target_goal_z=0.025,
+                )
+                print(
+                    f"detected goal_pw[2]={float(goal_pw[2]):.4f}, "
+                    f"current_lift={current_lift:.3f}, "
+                    f"target_lift={estimated_lift:.3f}"
+                )
+                arx.step_lift(estimated_lift)
             last_result = (goal_pw, actions)
             if not continuous:
                 return last_result
@@ -269,8 +291,11 @@ def main():
         arx.reset()
         nav_to_goal(
             arx,
-            goal="a white crumpled paper",
+            goal="a yellow glue",
             distance=0.55,
+            lift_height=15.0,
+            offset=0.25,
+            use_goal_z_for_lift=True,
             continuous=False,
             debug_raw=False,
             depth_median_n=5,

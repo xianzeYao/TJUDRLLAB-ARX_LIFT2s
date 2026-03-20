@@ -24,14 +24,14 @@ def special_give(arx: ARXRobotEnv, cup_side: str):
     else:
         give_action = {cup_side: np.array(
             [0.4, 0, 0.25, 0, 0, 0, CLOSE], dtype=np.float32)}
-    arx.step(give_action)
+    arx.step_smooth_eef(give_action)
     if cup_side == "left":
         give2_action = {cup_side: np.array(
             [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
     else:
         give2_action = {cup_side: np.array(
             [0.4, 0, 0.2, 0, 0, 0, CLOSE], dtype=np.float32)}
-    arx.step(give2_action)
+    arx.step_smooth_eef(give2_action)
     time.sleep(3.0)
     if cup_side == "left":
         open_action = {cup_side: np.array(
@@ -39,7 +39,7 @@ def special_give(arx: ARXRobotEnv, cup_side: str):
     else:
         open_action = {cup_side: np.array(
             [0.4, 0, 0.2, 0, 0, 0, OPEN], dtype=np.float32)}
-    arx.step(open_action)
+    arx.step_smooth_eef(open_action)
 
 
 def dual_cup_straw(
@@ -85,7 +85,7 @@ def dual_cup_straw(
         else:
             suit_action = {cup_side: np.array(
                 [0.35, 0.125, -0.05, 0, 0, 1.571, CLOSE], dtype=np.float32)}
-        arx.step(suit_action)
+        arx.step_smooth_eef(suit_action)
         single_arm_pick_place(
             arx,
             pick_prompt="",

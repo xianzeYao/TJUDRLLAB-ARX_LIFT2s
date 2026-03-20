@@ -106,7 +106,7 @@ def _run_parallel_sequences(
             act.update(left_seq[i])
         if i < len(right_seq):
             act.update(right_seq[i])
-        arx.step(act)
+        arx.step_smooth_eef(act)
 
 
 def _arm_home_action(arm: str, open_gripper: bool = True) -> Dict[str, np.ndarray]:

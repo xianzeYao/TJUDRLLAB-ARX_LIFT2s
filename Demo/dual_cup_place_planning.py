@@ -70,7 +70,7 @@ def _home_arm(arx: ARXRobotEnv, arm: str, open_gripper: bool = True) -> None:
         raise RuntimeError(f"Failed to home {arm} arm: {error_message}")
     if open_gripper:
         home_open = np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32)
-        arx.step_raw_eef({arm: home_open})
+        arx.step_smooth_eef({arm: home_open})
 
 
 def _desc_prompt(arm: str) -> str:

@@ -85,7 +85,7 @@ def pick_tools(arx: ARXRobotEnv) -> None:
         "left": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
         "right": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
     }
-    arx.step(open_action)
+    arx.step_smooth_eef(open_action)
     print("请放取扫把簸箕，5秒后开始夹取...")
     time.sleep(5.0)
 
@@ -93,14 +93,14 @@ def pick_tools(arx: ARXRobotEnv) -> None:
         "left": np.array([0.05, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
         "right": np.array([0.05, 0, 0, 0, 0, 0, 0.0], dtype=np.float32),
     }
-    arx.step(close_action)
+    arx.step_smooth_eef(close_action)
     time.sleep(5.0)
 
     lift_action = {
         "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
         "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
     }
-    arx.step(lift_action)
+    arx.step_smooth_eef(lift_action)
     time.sleep(1.0)
 
 
@@ -114,7 +114,7 @@ def release_tools(arx: ARXRobotEnv) -> None:
         "left": np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
         "right": np.array([0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
     }
-    arx.step(open_action)
+    arx.step_smooth_eef(open_action)
     time.sleep(5.0)
 
 
@@ -188,7 +188,7 @@ def dual_swap(
         if not swap_seq:
             return target_base_point
 
-        arx.step(swap_seq[0])
+        arx.step_smooth_eef(swap_seq[0])
         sweep_actions = swap_seq[1:]
         actions_per_sweep = 4
         max_sweeps = len(sweep_actions) // actions_per_sweep
@@ -196,7 +196,7 @@ def dual_swap(
             start = sweep_idx * actions_per_sweep
             end = start + actions_per_sweep
             for action in sweep_actions[start:end]:
-                arx.step(action)
+                arx.step_smooth_eef(action)
             if sweep_idx == max_sweeps - 1:
                 break
             if not _confirm_continue_swap(sweep_idx + 1, max_sweeps):

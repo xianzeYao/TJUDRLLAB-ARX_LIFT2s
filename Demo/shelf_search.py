@@ -13,6 +13,7 @@ import numpy as np
 from arx_pointing import predict_multi_points_from_rgb
 from single_arm_pick_place import single_arm_pick_place
 from demo_utils import step_base_duration
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
 if str(ROS2_DIR) not in sys.path:
@@ -59,8 +60,7 @@ def get_color_frame(arx: ARXRobotEnv) -> np.ndarray:
     target_size = (640, 480)
     camera_key = "camera_h_color"
     while True:
-        frames = arx.get_camera(
-            target_size=target_size, return_status=False)
+        frames = arx.get_camera(target_size=target_size, return_status=False)
         color = frames.get(camera_key)
         if color is not None:
             return color
@@ -124,6 +124,7 @@ def _show_debug_result(
     ]
     if elapsed_move is not None and max_move_duration is not None:
         lines.append(f"Move time: {elapsed_move:.2f}/{max_move_duration:.2f}s")
+
     y = 28
     for line in lines:
         cv2.putText(
@@ -136,6 +137,7 @@ def _show_debug_result(
             2,
         )
         y += 24
+
     win = "shelf_search_debug"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.imshow(win, vis)
@@ -177,6 +179,7 @@ def query_target(
     bool_result = ask_bool(color, bool_prompt)
     point = None
     bounds = _center_region_bounds(color, ratio=center_region_ratio)
+
     if bool_result:
         try:
             points, _ = predict_multi_points_from_rgb(
@@ -189,9 +192,11 @@ def query_target(
             )
         except Exception as exc:
             raise RuntimeError(f"ER1.5 call failed: {exc}") from exc
+
         if points:
             u, v = points[0]
             point = (int(round(u)), int(round(v)))
+
     result = bool_result and _point_in_bounds(point, bounds)
     elapsed = time.time() - start
     print(f"query_target elapsed: {elapsed:.3f}s")
@@ -224,14 +229,15 @@ def target_point_prompt(object_desc: str) -> str:
 def on_target_found(
     arx: ARXRobotEnv,
     object_desc: str,
-    debug_pick_place: bool,
-    depth_median_n: int,
+    pick_side: str = "fit",
+    debug_pick_place: bool = False,
+    depth_median_n: int = 10,
 ) -> tuple[bool, Optional[str]]:
     pick_ref, place_ref, arm_used = single_arm_pick_place(
         arx=arx,
         pick_prompt=object_desc,
         place_prompt="",
-        arm_side="fit",
+        arm_side=pick_side,
         item_type="cup",
         debug=debug_pick_place,
         depth_median_n=depth_median_n,
@@ -246,14 +252,16 @@ def _handle_found_target(
     arx: ARXRobotEnv,
     object_prompt: str,
     query: TargetQueryResult,
-    debug_raw: bool,
-    debug_pick_place: bool,
-    depth_median_n: int,
-    center_region_ratio: float,
+    pick_side: str = "fit",
+    debug_raw: bool = False,
+    debug_pick_place: bool = False,
+    depth_median_n: int = 10,
+    center_region_ratio: float = 0.6,
     elapsed_move: Optional[float] = None,
     max_move_duration: Optional[float] = None,
 ) -> tuple[bool, Optional[str]]:
     arx.step_base(0.0, 0.0, 0.0)
+
     if debug_raw:
         key = _show_debug_result(
             query=query,
@@ -268,11 +276,14 @@ def _handle_found_target(
                 remaining_move_duration = 0.0
             else:
                 remaining_move_duration = max(
-                    max_move_duration - elapsed_move, 0.0)
+                    max_move_duration - elapsed_move, 0.0
+                )
             raise UserAbortSearch(remaining_move_duration)
+
     return on_target_found(
-        arx,
-        object_prompt,
+        arx=arx,
+        object_desc=object_prompt,
+        pick_side=pick_side,
         debug_pick_place=debug_pick_place,
         depth_median_n=depth_median_n,
     )
@@ -284,12 +295,13 @@ def _scan_direction(
     vy: float,
     obj_bool_prompt: str,
     obj_point_prompt: str,
-    debug_raw: bool,
-    debug_pick_place: bool,
-    depth_median_n: int,
-    center_region_ratio: float,
-    max_move_duration: float,
-    check_interval: float,
+    pick_side: str = "fit",
+    debug_raw: bool = False,
+    debug_pick_place: bool = False,
+    depth_median_n: int = 10,
+    center_region_ratio: float = 0.6,
+    max_move_duration: float = 6.0,
+    check_interval: float = DEFAULT_CHECK_INTERVAL,
 ) -> ScanDirectionResult:
     vx, vz = 0.0, 0.0
     moved_duration = 0.0
@@ -309,12 +321,14 @@ def _scan_direction(
             )
             elapsed = min(time.time() - phase_start, remaining_duration)
             total_elapsed = moved_duration + elapsed
+
             if query.result:
                 print("True")
                 found, arm_used = _handle_found_target(
                     arx=arx,
                     object_prompt=object_prompt,
                     query=query,
+                    pick_side=pick_side,
                     debug_raw=debug_raw,
                     debug_pick_place=debug_pick_place,
                     depth_median_n=depth_median_n,
@@ -326,11 +340,13 @@ def _scan_direction(
                     return ScanDirectionResult(
                         success=True,
                         remaining_move_duration=max(
-                            max_move_duration - total_elapsed, 0.0),
+                            max_move_duration - total_elapsed, 0.0
+                        ),
                         arm_used=arm_used,
                     )
                 moved_duration = total_elapsed
                 break
+
             sleep_time = check_interval - (time.time() - check_start)
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -352,24 +368,27 @@ def search_shelf(
     v: float,
     drop_height: float,
     max_layer: int,
+    pick_side: str = "fit",
     center_region_ratio: float = 0.6,
     max_move_duration: float = 6.0,
     check_interval: float = DEFAULT_CHECK_INTERVAL,
     debug_raw: bool = False,
     debug_pick_place: bool = False,
     depth_median_n: int = 10,
+    start_height: float = 0.0,
 ) -> ShelfSearchResult:
     if max_layer <= 0:
         raise ValueError("max_layer must be > 0")
     if drop_height <= 0:
         raise ValueError("drop_height must be > 0")
+    if pick_side not in ("fit", "left", "right"):
+        raise ValueError("pick_side must be one of: 'fit', 'left', 'right'")
     if not 0.0 < center_region_ratio <= 1.0:
         raise ValueError("center_region_ratio must be in (0, 1]")
     if max_move_duration <= 0:
         raise ValueError("max_move_duration must be > 0")
     if check_interval < 0:
         raise ValueError("check_interval must be >= 0")
-    start_height = 13.0
 
     try:
         arx.step_lift(start_height)
@@ -389,6 +408,7 @@ def search_shelf(
                 arx=arx,
                 object_prompt=object_prompt,
                 query=query,
+                pick_side=pick_side,
                 debug_raw=debug_raw,
                 debug_pick_place=debug_pick_place,
                 depth_median_n=depth_median_n,
@@ -398,6 +418,7 @@ def search_shelf(
             )
         else:
             found, arm_used = False, None
+
         if found:
             return ShelfSearchResult(
                 success=True,
@@ -410,11 +431,12 @@ def search_shelf(
             # Snake scan: odd layer left->right (+v), even layer right->left (-v).
             curr_vy = v if (layer_index % 2 == 1) else -v
             scan_result = _scan_direction(
-                arx,
-                object_prompt,
+                arx=arx,
+                object_prompt=object_prompt,
                 vy=curr_vy,
                 obj_bool_prompt=obj_bool_prompt,
                 obj_point_prompt=obj_point_prompt,
+                pick_side=pick_side,
                 debug_raw=debug_raw,
                 debug_pick_place=debug_pick_place,
                 depth_median_n=depth_median_n,
@@ -453,6 +475,7 @@ def search_shelf(
                     arx=arx,
                     object_prompt=object_prompt,
                     query=query,
+                    pick_side=pick_side,
                     debug_raw=debug_raw,
                     debug_pick_place=debug_pick_place,
                     depth_median_n=depth_median_n,
@@ -462,6 +485,7 @@ def search_shelf(
                 )
             else:
                 found, arm_used = False, None
+
             if found:
                 return ShelfSearchResult(
                     success=True,
@@ -497,47 +521,72 @@ def main() -> None:
         arx.reset()
         v = 0.6
         max_move_duration = 8
-        result = search_shelf(
-            arx=arx,
-            object_prompt="a brown horse",
-            v=v,
-            check_interval=0.2,
-            max_move_duration=max_move_duration,
-            drop_height=13.0,
-            max_layer=2,
-            center_region_ratio=0.35,
-            debug_raw=False,
-            debug_pick_place=False,
-            depth_median_n=5,
-        )
-        # 回归search原位
-        continue_duration = max_move_duration - \
-            result.remaining_move_duration if result.layer_index % 2 == 1 else result.remaining_move_duration
-        step_base_duration(arx, 0.0, -v, 0.0,
-                           duration=continue_duration)
-        # 顺时针旋转180度，直走，再逆时针旋转90度
+        target = ["a yellow glue", "a brown horse", "apple"]
 
-        step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=20)
-        arx.step_lift(14.0)
-        step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
-        # 抬高一点靠近桌子
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=1.1)
-        single_arm_pick_place(
-            arx=arx,
-            pick_prompt="",
-            place_prompt="the center part of square plate",
-            arm_side=result.arm_used,
-            item_type="cup",
-            debug=False,
-            depth_median_n=5,
-        )
-        arx.set_special_mode(1)
-        # 回来
-        step_base_duration(arx, -0.6, 0.0, 0.0, duration=1.1)
-        step_base_duration(arx, 0.0, 0.0, 0.5, duration=10.3)
-        step_base_duration(arx, 0.6, 0.0, 0.0, duration=20)
-        arx.step_lift(0.0)
+        for i in range(3):
+            if i == 0:
+                result = search_shelf(
+                    arx=arx,
+                    object_prompt=target[i],
+                    v=v,
+                    pick_side="left",
+                    check_interval=0.2,
+                    max_move_duration=max_move_duration,
+                    drop_height=0.5,
+                    max_layer=1,
+                    center_region_ratio=0.35,
+                    debug_raw=False,
+                    debug_pick_place=False,
+                    depth_median_n=5,
+                    start_height=0.0,
+                )
+            elif i == 1 or i == 2:
+                if i == 1:
+                    side = "fit"
+                else:
+                    side = "right"
+                result = search_shelf(
+                    arx=arx,
+                    object_prompt=target[i],
+                    v=v,
+                    pick_side=side,
+                    check_interval=0.2,
+                    max_move_duration=max_move_duration,
+                    drop_height=13.0,
+                    max_layer=2,
+                    center_region_ratio=0.35,
+                    debug_raw=False,
+                    debug_pick_place=False,
+                    depth_median_n=5,
+                    start_height=13.0,
+                )
+
+            # 回归search原位
+            continue_duration = (
+                max_move_duration - result.remaining_move_duration
+                if result.layer_index % 2 == 1
+                else result.remaining_move_duration
+            )
+            step_base_duration(arx, 0.0, -v, 0.0, duration=continue_duration)
+            step_base_duration(arx, 0.0, 0.0, 0.5, duration=20.6)
+            step_base_duration(arx, 0.6, 0.0, 0.0, duration=6)
+            arx.step_lift(14.5)
+            step_base_duration(arx, 0.0, -0.6, 0.0, duration=8)
+            single_arm_pick_place(
+                arx=arx,
+                pick_prompt="",
+                place_prompt=f"the {result.arm_used} part of square white plate",
+                arm_side=result.arm_used,
+                item_type="cup",
+                debug=True,
+                depth_median_n=5,
+            )
+            arx.set_special_mode(1)
+
+            # 回来
+            step_base_duration(arx, 0.0, 0.0, -0.5, duration=20.6)
+            step_base_duration(arx, 0.0, -0.6, 0.0, duration=8)
+            step_base_duration(arx, 0.6, 0.0, 0.0, duration=6)
     finally:
         arx.close()
 

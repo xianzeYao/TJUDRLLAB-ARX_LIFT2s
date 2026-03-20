@@ -22,14 +22,14 @@ def main():
             "left":  np.array([0, 0, 0, -1.571, 0, 0, -3.4], dtype=np.float32,),
             "right": np.array([0, 0, 0, 1.571, 0, 0, -3.4], dtype=np.float32),
         }
-        arx.step(open_action)
+        arx.step_smooth_eef(open_action)
         print("请放取春联，10秒后开始夹取...")
         time.sleep(5.0)
         close_action = {
             "left":  np.array([0, 0, 0, -1.571, 0, 0, 0.0], dtype=np.float32,),
             "right": np.array([0, 0, 0, 1.571, 0, 0, 0.0], dtype=np.float32),
         }
-        arx.step(close_action)
+        arx.step_smooth_eef(close_action)
 
         time.sleep(1.0)
         lift_action = {
@@ -37,7 +37,7 @@ def main():
                 [0.1, 0.05, 0.45, -1.571, 0, 0, 0.0], dtype=np.float32,),
             "right": np.array([0.1, -0.05, 0.45, 1.571, 0, 0, 0.0], dtype=np.float32),
         }
-        arx.step(lift_action)
+        arx.step_smooth_eef(lift_action)
         time.sleep(5.0)
         # 使用原厂IK抖动
         shake_action = {
@@ -56,7 +56,7 @@ def main():
         rmsg.gripper = float(shake_action["right"][6])
         arx.node.send_control_msg("right", rmsg)
         time.sleep(5.0)
-        arx.step(open_action)
+        arx.step_smooth_eef(open_action)
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:

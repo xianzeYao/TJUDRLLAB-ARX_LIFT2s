@@ -72,7 +72,7 @@ status = env.get_robot_status()
 action = {
     "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
 }
-env.step(action)
+env.step_smooth_eef(action)
 
 # 3) 控制升降和底盘
 env.step_lift(18.0)
@@ -221,7 +221,7 @@ base = status["base"]
 - 判断当前机械臂或底盘状态
 - 不想取图，只想轻量读取状态
 
-## `step(action)`
+## `step_smooth_eef(action)`
 
 最常用的末端控制接口。
 
@@ -237,7 +237,7 @@ action = {
     "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
     "right": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
 }
-env.step(action)
+env.step_smooth_eef(action)
 ```
 
 特点：
@@ -422,7 +422,7 @@ def main():
         action = {
             "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.2], dtype=np.float32),
         }
-        env.step(action)
+        env.step_smooth_eef(action)
 
         env.step_base(0.2, 0.0, 0.0)
         time.sleep(1.0)
@@ -442,7 +442,7 @@ if __name__ == "__main__":
 ## 7. 使用建议
 
 - 普通业务优先用 `env.get_observation()`、`env.get_camera()`、`env.get_robot_status()`，不要一开始就直接操作 `env.node`
-- 常规末端控制优先用 `env.step(...)`
+- 常规末端控制优先用 `env.step_smooth_eef(...)`
 - 需要 joint 级调试时再用 `step_raw_joint(...)`
 - 需要微调时优先用 `step_delta_eef(...)` 或 `step_delta_joint(...)`
 - 任何程序都建议把 `close()` 放在 `finally` 里

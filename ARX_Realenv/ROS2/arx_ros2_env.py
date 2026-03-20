@@ -81,7 +81,7 @@ class ARXRobotEnv():
             return (False, "base command not sent")
         return (True, None)
 
-    def _apply_action(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
+    def _apply_smooth_action(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
         """
         apply to the robot single step control command.
             action: the action provieded by the agent（step level）.
@@ -190,6 +190,54 @@ class ARXRobotEnv():
                 return (False, f"{side}: command not sent")
         return (True, None)
 
+    def _apply_smooth_joint(
+        self,
+        action: Dict[str, np.ndarray],
+        num_steps: int = 5,
+        step_sleep_s: float = 0.01,
+    ) -> Tuple[bool, str | None]:
+        ok, payload = self._normalize_dual_arm_action(
+            action, 7, "smooth_joint")
+        if not ok:
+            return (False, payload)
+
+        num_steps = int(num_steps)
+        if num_steps <= 0:
+            return (False, f"smooth_joint num_steps must be > 0, got {num_steps}")
+
+        step_sleep_s = float(step_sleep_s)
+        if step_sleep_s < 0.0:
+            return (False, f"smooth_joint step_sleep_s must be >= 0, got {step_sleep_s}")
+
+        status = self.get_robot_status()
+        start_joint: Dict[str, np.ndarray] = {}
+        for side, target in payload.items():
+            arm_status = status.get(side) if isinstance(status, dict) else None
+            if arm_status is None:
+                return (False, f"{side}: current joint status unavailable")
+            joint_pos = getattr(arm_status, "joint_pos", None)
+            if joint_pos is None:
+                return (False, f"{side}: current joint position unavailable")
+            joint_pos = np.asarray(joint_pos, dtype=np.float32).reshape(-1)
+            if joint_pos.shape[0] < 7:
+                return (False, f"{side}: malformed current joint position {joint_pos.shape}")
+            start_joint[side] = joint_pos[:7].copy()
+
+        for step_idx in range(1, num_steps + 1):
+            alpha = step_idx / float(num_steps)
+            for side, target in payload.items():
+                interp = (1.0 - alpha) * start_joint[side] + alpha * target
+                msg = RobotCmd()
+                msg.mode = 5
+                msg.joint_pos = [float(x) for x in interp[:6]]
+                msg.gripper = float(interp[6])
+                if not self.node.send_control_msg(side, msg):
+                    return (False, f"{side}: command not sent")
+            if step_idx < num_steps and step_sleep_s > 0.0:
+                time.sleep(step_sleep_s)
+
+        return (True, None)
+
     def _apply_delta_eef(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
         ok, payload = self._normalize_dual_arm_action(action, 7, "delta_eef")
         if not ok:
@@ -246,7 +294,7 @@ class ARXRobotEnv():
             home_action = {side: home_target.copy()}
         else:
             return (False, f"invalid side: {side}")
-        success, error_message = self._apply_action(home_action)
+        success, error_message = self._apply_smooth_action(home_action)
         if not success:
             print(
                 f"failed to go home: {error_message}, force switch to home mode")
@@ -285,7 +333,8 @@ class ARXRobotEnv():
             pass
 
         try:
-            joint_pos = np.asarray(status.joint_pos, dtype=np.float32).reshape(-1)
+            joint_pos = np.asarray(
+                status.joint_pos, dtype=np.float32).reshape(-1)
             if joint_pos.shape[0] >= 6:
                 cmd.joint_pos = [float(x) for x in joint_pos[:6]]
             if joint_pos.shape[0] >= 7:
@@ -405,17 +454,12 @@ class ARXRobotEnv():
             return self.get_observation()
         return None
 
-    def step(self, action: np.ndarray, return_observation: bool = False):
-        """
-        Execute one time step in the environment.
-
-        Args:
-            action (np.ndarray): Action provided by the agent. Shape (action_dim,).
-        """
+    def step_smooth_eef(self, action: Dict[str, np.ndarray], return_observation: bool = False):
+        """Execute a smoothed absolute end-effector command."""
         return self._step_with_apply(
             action,
-            self._apply_action,
-            "Failed to apply action",
+            self._apply_smooth_action,
+            "Failed to apply smooth EEF action",
             return_observation=return_observation,
         )
 
@@ -434,6 +478,23 @@ class ARXRobotEnv():
             action,
             self._apply_raw_joint,
             "Failed to apply raw joint action",
+            return_observation=return_observation,
+        )
+
+    def step_smooth_joint(
+        self,
+        action: Dict[str, np.ndarray],
+        num_steps: int = 5,
+        step_sleep_s: float = 0.01,
+        return_observation: bool = False,
+    ):
+        """Linearly interpolate absolute joint targets with repeated mode-5 joint commands."""
+        return self._step_with_apply(
+            action,
+            lambda payload: self._apply_smooth_joint(
+                payload, num_steps=num_steps, step_sleep_s=step_sleep_s
+            ),
+            "Failed to apply smooth joint action",
             return_observation=return_observation,
         )
 
@@ -661,19 +722,19 @@ def main():
     #                   camera_view=("camera_h",),
     #                   dir="testdata",
     #                   img_size=(640, 480))
-    
+
     obs = arx.reset()
     arx.step_lift(18.0)
     action = {
         "left": np.array([0.1, 0, 0.15, 0, 0, 0, -2.0], dtype=np.float32),
         "right": np.array([0.1, 0, 0.15, 0, 0, 0, -2.0], dtype=np.float32),
     }
-    arx.step(action)
+    arx.step_smooth_eef(action)
     action = {
         "left": np.array([0.2, 0, 0.17, 0, 0, 0, -3.4], dtype=np.float32),
         "right": np.array([0.2, 0, 0.17, 0, 0, 0, -3.4], dtype=np.float32),
     }
-    arx.step(action)
+    arx.step_smooth_eef(action)
     arx.close()
 
 

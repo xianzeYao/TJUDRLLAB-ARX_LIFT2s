@@ -18,6 +18,10 @@ from motion_pick_place_straw import (
     build_place_straw_sequence,
 )
 
+LIFT_SAMPLES = np.array([0.0, 5.0, 10.0, 15.0, 20.0], dtype=np.float32)
+REF_HEIGHT_SAMPLES_M = np.array(
+    [0.55, 0.65, 0.80, 0.92, 1.02], dtype=np.float32)
+
 
 def _extract_cup_phrases(text: str) -> List[str]:
     phrases: List[str] = []
@@ -164,6 +168,25 @@ def step_base_duration(
     arx.step_base(0.0, 0.0, 0.0)
 
 
+def estimate_lift_from_goal_z(
+    goal_z: float,
+    current_lift: float,
+    target_goal_z: float = 0.025,
+    meters_per_lift_unit: float = float(
+        (REF_HEIGHT_SAMPLES_M[-1] - REF_HEIGHT_SAMPLES_M[0]) /
+        (LIFT_SAMPLES[-1] - LIFT_SAMPLES[0])
+    ),
+    min_lift: float = 0.0,
+    max_lift: float = 20.0,
+) -> float:
+    if abs(meters_per_lift_unit) < 1e-8:
+        raise ValueError("meters_per_lift_unit must be non-zero")
+    target_lift = float(current_lift) + (
+        float(goal_z) - float(target_goal_z)
+    ) / float(meters_per_lift_unit)
+    return float(np.clip(target_lift, min_lift, max_lift))
+
+
 def execute_pick_place_cup_sequence(
     arx,
     pick_ref: Optional[np.ndarray],
@@ -177,13 +200,13 @@ def execute_pick_place_cup_sequence(
             raise ValueError("pick_ref 为空")
         pick_seq = build_pick_cup_sequence(pick_ref, arm=arm)
         for act in pick_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)
     if do_place:
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_cup_sequence(place_ref, arm=arm)
         for act in place_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)
 
 
 def execute_pick_place_straw_sequence(
@@ -199,13 +222,13 @@ def execute_pick_place_straw_sequence(
             raise ValueError("pick_ref 为空")
         pick_seq = build_pick_straw_sequence(pick_ref, arm=arm)
         for act in pick_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)
     if do_place:
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_straw_sequence(place_ref, arm=arm)
         for act in place_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)
 
 
 def execute_pick_place_deepbox_sequence(
@@ -221,10 +244,10 @@ def execute_pick_place_deepbox_sequence(
             raise ValueError("pick_ref 为空")
         pick_seq = build_pick_deepbox_sequence(pick_ref, arm=arm)
         for act in pick_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)
     if do_place:
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_deepbox_sequence(place_ref, arm=arm)
         for act in place_seq:
-            arx.step(act)
+            arx.step_smooth_eef(act)

@@ -35,6 +35,7 @@ def nav_dual_sweep(
     arx: ARXRobotEnv,
     goal: str = "white paper balls",
     distance: float = 0.55,
+    nav_lift_height: float = 5.0,
     nav_debug_raw: bool = False,
     swap_debug_raw: bool = False,
     nav_depth_median_n: int = 5,
@@ -60,11 +61,12 @@ def nav_dual_sweep(
                 "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
                 "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
             }
-            arx.step(lift_action)
+            arx.step_smooth_eef(lift_action)
             nav_result = nav_to_goal(
                 arx,
                 goal=goal,
                 distance=distance,
+                lift_height=nav_lift_height,
                 continuous=False,
                 debug_raw=nav_debug_raw,
                 depth_median_n=nav_depth_median_n,
@@ -113,6 +115,7 @@ def main():
             arx,
             goal="paper cup or paper ball or bottle on the floor",
             distance=0.53,
+            nav_lift_height=5.0,
             nav_debug_raw=True,
             swap_debug_raw=True,
             nav_depth_median_n=2,

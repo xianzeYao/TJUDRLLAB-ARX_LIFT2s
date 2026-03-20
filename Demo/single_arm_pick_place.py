@@ -46,7 +46,7 @@ def _release_gripper_at_current_eef(
             dtype=np.float32,
         )
     }
-    arx.step(action)
+    arx.step_smooth_eef(action)
 
 
 def _predict_one_point(color: np.ndarray, base_prompt: str) -> Tuple[int, int]:
@@ -240,11 +240,11 @@ def main():
     arx.step_lift(18.0)
     # right_open_action = {"right": np.array(
     #     [0, 0, 0, 0, 0, 0, -3.4], dtype=np.float32)}
-    # arx.step(right_open_action)
+    # arx.step_smooth_eef(right_open_action)
     # time.sleep(5.0)
     # right_close_action = {"right": np.array(
     #     [0, 0, 0, 0, 0, 0, -2.05], dtype=np.float32)}
-    # arx.step(right_close_action)
+    # arx.step_smooth_eef(right_close_action)
     # place_prompt = "the center part of the brown coaster on the right side"
     # single_arm_pick_place(arx, pick_prompt="", place_prompt=place_prompt, arm_side="right",
     #                       debug=True, depth_median_n=10)
