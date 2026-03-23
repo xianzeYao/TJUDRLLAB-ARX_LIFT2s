@@ -13,12 +13,9 @@ sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
 from arx_pointing import predict_multi_points_from_rgb
 from arx_ros2_env import ARXRobotEnv
-from demo_utils import estimate_lift_from_goal_z, step_base_duration
-from nav_utils import path_to_actions
+from demo_utils import estimate_lift_from_goal_z
+from nav_utils import execute_nav_actions, path_to_actions, recover_rotations
 from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
-
-BASE_FORWARD_SPEED = 0.125
-BASE_ROTATE_SPEED = math.pi / 20.6
 
 
 def _build_presence_prompt(goal: str) -> str:
@@ -135,34 +132,6 @@ def _confirm_debug_view(
         return True
 
 
-def _execute_nav_actions(
-    arx: ARXRobotEnv,
-    actions: List[Tuple[str, float]],
-    distance: float,
-) -> None:
-    for action, value in actions:
-        if action == "rotate":
-            if value <= 0:
-                duration = max(-value - 0.1, 0.1) / BASE_ROTATE_SPEED
-                step_base_duration(arx, vx=0.0, vy=0.0, vz=-
-                                   0.5, duration=float(duration))
-            else:
-                duration = value / BASE_ROTATE_SPEED
-                step_base_duration(arx, vx=0.0, vy=0.0,
-                                   vz=0.5, duration=float(duration))
-        elif action == "forward":
-            remaining = value - distance
-            if remaining <= 0:
-                continue
-            step_base_duration(
-                arx,
-                vx=0.75,
-                vy=0.0,
-                vz=0.0,
-                duration=float(remaining / BASE_FORWARD_SPEED),
-            )
-
-
 def nav_to_goal(
     arx: ARXRobotEnv,
     goal: str = "white paper balls",
@@ -170,6 +139,8 @@ def nav_to_goal(
     lift_height: float = 0.0,
     offset: float = 0.5,
     use_goal_z_for_lift: bool = False,
+    target_goal_z: float = 0.0,
+    rotate_recover: bool = False,
     continuous: bool = False,
     debug_raw: bool = False,
     depth_median_n: int = 5,
@@ -251,7 +222,11 @@ def nav_to_goal(
                     print("Refresh requested.")
                     continue
 
-            _execute_nav_actions(arx, actions, distance=distance)
+            executed_rotations = execute_nav_actions(
+                arx,
+                actions,
+                distance=distance,
+            )
             if use_goal_z_for_lift:
                 base_status = arx.get_robot_status().get("base")
                 current_lift = float(
@@ -259,7 +234,7 @@ def nav_to_goal(
                 estimated_lift = estimate_lift_from_goal_z(
                     goal_z=float(goal_pw[2]),
                     current_lift=current_lift,
-                    target_goal_z=0.025,
+                    target_goal_z=target_goal_z,
                 )
                 print(
                     f"detected goal_pw[2]={float(goal_pw[2]):.4f}, "
@@ -267,6 +242,8 @@ def nav_to_goal(
                     f"target_lift={estimated_lift:.3f}"
                 )
                 arx.step_lift(estimated_lift)
+            if rotate_recover:
+                recover_rotations(arx, executed_rotations)
             last_result = (goal_pw, actions)
             if not continuous:
                 return last_result

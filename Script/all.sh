@@ -21,6 +21,8 @@ sleep 1
 gnome-terminal -t "left&right" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/ARX_X5/ROS2/X5_ws; source install/setup.bash && ros2 launch arx_x5_controller v2_double_arm.launch.py; exec bash;"
 # gnome-terminal -t "left" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/ARX_X5/ROS2/X5_ws; source install/setup.bash && ros2 launch arx_x5_controller v2_single_arm.launch.py; exec bash;"
 
+sleep 1
+
 # camera_h
 gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
@@ -32,10 +34,12 @@ gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_namespace:=camera_h_namespace \
   serial_no:=_409122274317 \
   depth_module.color_profile:=640x480x60 \
-  depth_module.depth_profile:=640x480x60\
-  depth_module.enable_auto_exposure:=true\
-  rgb_camera.enable_auto_exposure:=true;exec bash;"
+  depth_module.depth_profile:=640x480x60 \
+  depth_module.enable_auto_exposure:=false \
+  depth_module.exposure:=12500 \
+  depth_module.gain:=16;exec bash;"
 
+sleep 1
 # camera_l
 gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
@@ -47,11 +51,12 @@ gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_namespace:=camera_l_namespace \
   serial_no:=_409122272587 \
   depth_module.color_profile:=640x480x60 \
-  depth_module.depth_profile:=640x480x60\
-  depth_module.enable_auto_exposure:=true\
-  rgb_camera.enable_auto_exposure:=true; exec bash;"
+  depth_module.depth_profile:=640x480x60 \
+  depth_module.enable_auto_exposure:=false \
+  depth_module.exposure:=12500 \
+  depth_module.gain:=16;exec bash;"
 
-
+sleep 1
 # camera_r
 gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
@@ -63,6 +68,7 @@ gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_namespace:=camera_r_namespace \
   serial_no:=_409122272707 \
   depth_module.color_profile:=640x480x60 \
-  depth_module.depth_profile:=640x480x60\
-  depth_module.enable_auto_exposure:=true\
-  rgb_camera.enable_auto_exposure:=true; exec bash;"
+  depth_module.depth_profile:=640x480x60 \
+  depth_module.enable_auto_exposure:=false \
+  depth_module.exposure:=12500 \
+  depth_module.gain:=16;exec bash;"

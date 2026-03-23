@@ -22,7 +22,8 @@ def smart_shelf_search(
     arx: ARXRobotEnv,
     search_prompt: str,
     first_nav_height: int,
-    second_nav_height: int,
+    nav_table_prompt: str,
+    rotate_recover: bool,
     place_prompt: str,
     nav_debug: bool = True,
     debug_pick_place: bool = False,
@@ -30,6 +31,8 @@ def smart_shelf_search(
 ):
     if not search_prompt:
         raise ValueError("search_prompt must be non-empty")
+    if not nav_table_prompt:
+        raise ValueError("nav_table_prompt must be non-empty")
     if not place_prompt:
         raise ValueError("place_prompt must be non-empty")
 
@@ -42,9 +45,10 @@ def smart_shelf_search(
         first_nav_result = nav_to_goal(
             arx=arx,
             goal=search_prompt,
-            distance=0.6,
+            distance=0.5,
             lift_height=first_nav_height,
-            offset=0.25,
+            rotate_recover=rotate_recover,
+            offset=0.22,
             use_goal_z_for_lift=True,
             continuous=False,
             debug_raw=nav_debug,
@@ -60,7 +64,6 @@ def smart_shelf_search(
                 "place_arm": None,
             }
 
-        time.sleep(1.0)
         _, _, pick_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt=search_prompt,
@@ -80,14 +83,17 @@ def smart_shelf_search(
                 "place_arm": None,
             }
 
-        step_base_duration(arx, 0.0, 0.0, -1.0, duration=10)
+        step_base_duration(arx, 0.0, 0.0, -1.0, duration=7)
+        current_height = arx.get_robot_status().get("base").height
         second_nav_result = nav_to_goal(
             arx=arx,
-            goal=place_prompt,
-            distance=0.6,
-            lift_height=second_nav_height,
-            offset=0.25,
-            use_goal_z_for_lift=True,
+            goal=nav_table_prompt,
+            distance=0.22,
+            rotate_recover=True,
+            lift_height=current_height,
+            offset=0.22,
+            use_goal_z_for_lift=False,
+            target_goal_z=0.1,
             continuous=False,
             debug_raw=nav_debug,
             depth_median_n=depth_median_n,
@@ -101,8 +107,11 @@ def smart_shelf_search(
                 "pick_arm": pick_arm,
                 "place_arm": None,
             }
-
-        time.sleep(1.0)
+        step_base_duration(arx, 0.0, 0.0, -1.0, duration=3.2)
+        if "shelf" in place_prompt.lower():
+            arx.step_lift(0.0)
+        else:
+            arx.step_lift(14.0)
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
@@ -112,6 +121,7 @@ def smart_shelf_search(
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
+        arx.set_special_mode(1)
         if place_arm is None:
             return {
                 "success": False,
@@ -121,7 +131,9 @@ def smart_shelf_search(
                 "pick_arm": pick_arm,
                 "place_arm": None,
             }
-
+        step_base_duration(arx, 0.0, 0.0, -1.0, duration=5.1)
+        step_base_duration(arx, 0.75, 0.0, 0.0, duration=6.2)
+        step_base_duration(arx, 0.0, 0.0, -1.0, duration=5.1)
         return {
             "success": True,
             "message": "smart shelf search completed",
@@ -130,6 +142,7 @@ def smart_shelf_search(
             "pick_arm": pick_arm,
             "place_arm": place_arm,
         }
+
     finally:
         cv2.destroyAllWindows()
 
@@ -150,25 +163,30 @@ def main() -> None:
         arx.reset()
         search_prompts = [
             "a tennis ball",
+            "a pink soda can",
             "a blue box",
-            "a brown horse",
         ]
-        place_prompt = "a white square plate"
+        place_prompts = [
+            "a blue square plate",
+            "the right part of the second floor on shelf",
+            "a blue square plate",
+        ]
 
-        for idx, search_prompt in enumerate(search_prompts):
+        for search_prompt, place_prompt in zip(search_prompts, place_prompts):
             result = smart_shelf_search(
                 arx=arx,
-                first_nav_height=16,
-                second_nav_height=20,
+                first_nav_height=14.0,
                 search_prompt=search_prompt,
+                nav_table_prompt="a red dot on the floor",
                 place_prompt=place_prompt,
-                nav_debug=True,
-                debug_pick_place=True,
-                depth_median_n=5,
+                rotate_recover=True,
+                nav_debug=False,
+                debug_pick_place=False,
+                depth_median_n=10,
             )
             print(f"{search_prompt}: {result}")
-
-            step_base_duration(arx, 0.0, 0.0, -1.0, duration=10)
+            if not result["success"]:
+                break
     finally:
         arx.close()
 

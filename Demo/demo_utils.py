@@ -171,7 +171,7 @@ def step_base_duration(
 def estimate_lift_from_goal_z(
     goal_z: float,
     current_lift: float,
-    target_goal_z: float = 0.025,
+    target_goal_z: float = 0.0,
     meters_per_lift_unit: float = float(
         (REF_HEIGHT_SAMPLES_M[-1] - REF_HEIGHT_SAMPLES_M[0]) /
         (LIFT_SAMPLES[-1] - LIFT_SAMPLES[0])
