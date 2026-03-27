@@ -23,7 +23,7 @@ from arx_ros2_env import ARXRobotEnv
 def main():
     env = None
     try:
-        arx = ARXRobotEnv(
+        env = ARXRobotEnv(
             duration_per_step=1.0 / 20.0,
             min_steps=20,
             max_v_xyz=0.25,
@@ -35,14 +35,15 @@ def main():
             img_size=(640, 480),
         )
 
-        arx = arx.reset()
-        print(arx.keys())
-        # arx.reset()
+        obs = env.reset()
+        print(obs.keys())
+        # obs = env.reset()
 
         # 这里开始写你的业务逻辑
 
     finally:
-        arx.close()
+        if env is not None:
+            env.close()
 
 
 if __name__ == "__main__":

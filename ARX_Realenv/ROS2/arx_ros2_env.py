@@ -296,19 +296,11 @@ class ARXRobotEnv():
             return (False, f"invalid side: {side}")
         success, error_message = self._apply_smooth_action(home_action)
         if not success:
-            print(
-                f"failed to go home: {error_message}, force switch to home mode")
-            fallback_targets = ("left", "right") if side == "both" else (side,)
-            fallback_success, fallback_error = self._send_special_mode(
-                1, fallback_targets)
-            if not fallback_success:
-                return (False, fallback_error or f"failed to go home: {error_message}")
             return (False, f"failed to go home: {error_message}")
+        if side == "both":
+            print("both arms homed")
         else:
-            if side == "both":
-                print("both arms homed")
-            else:
-                print(f"{side} arm homed")
+            print(f"{side} arm homed")
         return (True, None)
 
     @staticmethod

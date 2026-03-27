@@ -105,7 +105,7 @@ def make_place_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [base[0] - GRIPPER_OFFSET, base[1] + calibrate_offset,
-         base[2] + Z_CUP+0.08, 0, 0, 0, GRIPPER_CUP],
+         base[2] + Z_CUP+0.1, 0, 0, 0, GRIPPER_CUP],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)
@@ -117,7 +117,7 @@ def make_down_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [base[0] - GRIPPER_OFFSET, base[1] + calibrate_offset,
-         base[2] + Z_CUP+0.01, 0, 0, 0, GRIPPER_CUP],
+         base[2] + Z_CUP+0.02, 0, 0, 0, GRIPPER_CUP],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)
@@ -129,7 +129,7 @@ def make_open_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [base[0] - GRIPPER_OFFSET, base[1] + calibrate_offset,
-            base[2] + Z_CUP+0.01, 0, 0, 0, OPEN],
+            base[2] + Z_CUP+0.02, 0, 0, 0, OPEN],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)
@@ -140,7 +140,7 @@ def make_place_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
-        [base[0] - GRIPPER_OFFSET - 0.08, base[1] + calibrate_offset,
+        [base[0] - GRIPPER_OFFSET - 0.05, base[1] + calibrate_offset,
          base[2] + Z_CUP+0.07, 0, 0, 0, OPEN],
         dtype=np.float32,
     )
