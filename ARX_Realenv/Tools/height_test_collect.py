@@ -14,9 +14,13 @@ import numpy as np
 import sys
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ARX_Realenv/ROS2").resolve()
+ROOT_DIR = THIS_DIR.parent.parent
+ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
+DEMO_DIR = (ROOT_DIR / "Demo").resolve()
 if str(ROS2_DIR) not in sys.path:
     sys.path.insert(0, str(ROS2_DIR))
+if str(DEMO_DIR) not in sys.path:
+    sys.path.insert(0, str(DEMO_DIR))
 
 from arx_pointing import predict_multi_points_from_rgb  # noqa: E402
 from arx_ros2_env import ARXRobotEnv  # noqa: E402
@@ -154,7 +158,7 @@ def main() -> None:
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("../Testdata4Mani/height_test.json"),
+        default=THIS_DIR / "Testdata4Lift" / "height_test_manual.json",
         help="output json path",
     )
     parser.add_argument("--camera", type=str, default="camera_h")

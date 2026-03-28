@@ -145,15 +145,34 @@ def nav_to_goal(
     debug_raw: bool = False,
     depth_median_n: int = 5,
     vote_times: int = 5,
+    rotate_search_on_miss: bool = False,
 ):
     old_settings = _init_keyboard()
     last_result = None
+    rotating_search = False
+    consecutive_true_count = 0
+    consecutive_true_required = 5
+
+    def _start_rotate_search() -> None:
+        nonlocal rotating_search
+        if rotating_search:
+            return
+        arx.step_base(0.0, 0.0, 1.0)
+        rotating_search = True
+
+    def _stop_rotate_search() -> None:
+        nonlocal rotating_search
+        if not rotating_search:
+            return
+        arx.step_base(0.0, 0.0, 0.0)
+        rotating_search = False
 
     try:
         arx.step_lift(lift_height)
         while True:
             key = _get_key_nonblock()
             if key == "q":
+                _stop_rotate_search()
                 print("Stop signal received.")
                 return last_result
 
@@ -169,11 +188,29 @@ def nav_to_goal(
             detect_goal = _vote_goal_presence(
                 color, goal=goal, vote_times=vote_times)
             if not detect_goal:
+                consecutive_true_count = 0
                 print(f"No goal detected for: {goal}")
+                if rotate_search_on_miss:
+                    _start_rotate_search()
+                    time.sleep(0.2)
+                    continue
                 if continuous:
                     time.sleep(0.2)
                     continue
                 return None
+            if rotating_search:
+                consecutive_true_count += 1
+                if consecutive_true_count < consecutive_true_required:
+                    print(
+                        f"Goal detected during rotate search: "
+                        f"{consecutive_true_count}/{consecutive_true_required}"
+                    )
+                    time.sleep(0.2)
+                    continue
+            else:
+                consecutive_true_count = 0
+            _stop_rotate_search()
+            consecutive_true_count = 0
 
             color, depth = get_aligned_frames(
                 arx, depth_median_n=depth_median_n)
@@ -192,6 +229,10 @@ def nav_to_goal(
             )
             if points is None or len(points) == 0:
                 print(f"Goal detected but no point found for: {goal}")
+                if rotate_search_on_miss:
+                    _start_rotate_search()
+                    time.sleep(0.2)
+                    continue
                 if continuous:
                     time.sleep(0.2)
                     continue
@@ -205,6 +246,10 @@ def nav_to_goal(
                 )
             except ValueError as exc:
                 print(exc)
+                if rotate_search_on_miss:
+                    _start_rotate_search()
+                    time.sleep(0.2)
+                    continue
                 if continuous:
                     time.sleep(0.2)
                     continue
@@ -216,6 +261,7 @@ def nav_to_goal(
             if debug_raw:
                 debug_result = _confirm_debug_view(color, points, goal_pixel)
                 if debug_result is None:
+                    _stop_rotate_search()
                     print("Stop signal received.")
                     return last_result
                 if not debug_result:
@@ -248,6 +294,7 @@ def nav_to_goal(
             if not continuous:
                 return last_result
     finally:
+        _stop_rotate_search()
         cv2.destroyAllWindows()
         _restore_keyboard(old_settings)
 

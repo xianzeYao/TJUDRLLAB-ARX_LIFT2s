@@ -71,6 +71,7 @@ def nav_dual_sweep(
                 debug_raw=nav_debug_raw,
                 depth_median_n=nav_depth_median_n,
                 vote_times=vote_times,
+                rotate_search_on_miss=True,
             )
             if nav_result is None:
                 print("nav_to_goal failed, retry next cycle")
@@ -114,8 +115,8 @@ def main():
         nav_dual_sweep(
             arx,
             goal="paper cup or paper ball or bottle on the floor",
-            distance=0.53,
-            nav_lift_height=5.0,
+            distance=0.55,
+            nav_lift_height=0.0,
             nav_debug_raw=True,
             swap_debug_raw=True,
             nav_depth_median_n=2,

@@ -10,9 +10,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ARX_Realenv/ROS2").resolve()
+ROOT_DIR = THIS_DIR.parent.parent
+ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
+DEMO_DIR = (ROOT_DIR / "Demo").resolve()
 if str(ROS2_DIR) not in sys.path:
     sys.path.insert(0, str(ROS2_DIR))
+if str(DEMO_DIR) not in sys.path:
+    sys.path.insert(0, str(DEMO_DIR))
 
 from base_calib_collect import (
     CENTER_TO_WHEEL_M,
@@ -24,7 +28,7 @@ from base_calib_collect import (
 
 
 DEFAULT_PROMPT = "tennis ball"
-DEFAULT_OUT_DIR = THIS_DIR / "Testdata4Mani" / "lift_pwz"
+DEFAULT_OUT_DIR = THIS_DIR / "Testdata4Lift"
 DEFAULT_SAMPLE_HZ = 1.0
 DEFAULT_LIFT_RATE = 1.0
 DEFAULT_START_HEIGHT = 0.0

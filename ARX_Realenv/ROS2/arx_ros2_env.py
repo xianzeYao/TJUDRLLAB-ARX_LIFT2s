@@ -55,8 +55,8 @@ class ARXRobotEnv():
             return (False, "base status unavailable")
         curr = float(base_status.height)
         target = float(height)
-        step = 0.1 if target >= curr else -0.1
-        while abs(curr - target) > 0.01:
+        step = 0.03 if target >= curr else -0.03
+        while abs(curr - target) > 0.03:
             curr += step
             # 防止越界
             if (step > 0 and curr > target) or (step < 0 and curr < target):
@@ -64,7 +64,7 @@ class ARXRobotEnv():
             msg.height = curr
             if not self.node.send_base_msg(msg):
                 return (False, "base command not sent")
-            time.sleep(0.03)
+            time.sleep(0.01)
         return (True, None)
 
     def _apply_base(self, vx: float, vy: float, vz: float) -> Tuple[bool, str | None]:

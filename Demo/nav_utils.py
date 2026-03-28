@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 from demo_utils import step_base_duration
 
-BASE_FORWARD_SPEED = 0.125
+BASE_FORWARD_SPEED = 0.155
 BASE_ROTATE_SPEED = (2.0 * math.pi) / 20.11
 FORWARD_VX_CMD = 0.75
 ROTATE_VZ_CMD = 1.0

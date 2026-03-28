@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ARX_Realenv/ROS2").resolve()
+ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
 if str(ROS2_DIR) not in sys.path:
     sys.path.insert(0, str(ROS2_DIR))
 
@@ -446,7 +446,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=Path,
-        default=THIS_DIR / "Testdata4Mani" / "base_calib",
+        default=THIS_DIR / "Testdata4Nav",
         help="Output directory for manifest and experiment files.",
     )
     parser.add_argument(
