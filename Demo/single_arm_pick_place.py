@@ -446,15 +446,18 @@ def main():
     # right_close_action = {"right": np.array(
     #     [0, 0, 0, 0, 0, 0, -2.05], dtype=np.float32)}
     # arx.step_smooth_eef(right_close_action)
-    # place_prompt = "the center part of the brown coaster on the right side"
-    # single_arm_pick_place(arx, pick_prompt="", place_prompt=place_prompt, arm_side="right",
-    #                       debug=True, depth_median_n=10)
-    pick_prompt = "a tennis ball"
     try:
-        single_arm_pick_place(arx, pick_prompt=pick_prompt, place_prompt="", arm_side="fit",
-                              debug=True, depth_median_n=10,
+        pick_prompt = "a tennis ball"
+        place_prompt = "the center part of the third floor on the shelf"
+        arx.step_lift(17.0)
+        single_arm_pick_place(arx, pick_prompt=pick_prompt, place_prompt=place_prompt, arm_side="right",
                               item_type="normal object",
-                              verify_completion=True,
+                              debug=True, depth_median_n=10)
+        arx.step_lift(14.0)
+        single_arm_pick_place(arx, pick_prompt=pick_prompt, place_prompt="", arm_side="right",
+                              debug=True, depth_median_n=10,
+
+                              verify_completion=False,
                               completion_retry_attempts=2,)
     finally:
         arx.close()

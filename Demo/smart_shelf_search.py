@@ -45,7 +45,7 @@ def smart_shelf_search(
         first_nav_result = nav_to_goal(
             arx=arx,
             goal=search_prompt,
-            distance=0.5,
+            distance=0.45,
             lift_height=first_nav_height,
             rotate_recover=rotate_recover,
             offset=0.22,
@@ -63,7 +63,8 @@ def smart_shelf_search(
                 "pick_arm": None,
                 "place_arm": None,
             }
-
+        if "blue" in search_prompt.lower():
+            search_prompt = "a blue box"
         _, _, pick_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt=search_prompt,
@@ -72,6 +73,8 @@ def smart_shelf_search(
             item_type="normal object",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
+            verify_completion=True,
+            completion_retry_attempts=0,
         )
         if pick_arm is None:
             return {
@@ -88,7 +91,7 @@ def smart_shelf_search(
         second_nav_result = nav_to_goal(
             arx=arx,
             goal=nav_table_prompt,
-            distance=0.22,
+            distance=-0.1,
             rotate_recover=True,
             lift_height=current_height,
             offset=0.22,
@@ -107,13 +110,17 @@ def smart_shelf_search(
                 "pick_arm": pick_arm,
                 "place_arm": None,
             }
-        step_base_duration(arx, 0.0, 0.0, -1.0, duration=3.2)
-        if "first" in place_prompt.lower():
-            arx.step_lift(14.0)
-        elif "second" in place_prompt.lower():
-            arx.step_lift(17.0)
-        elif "third" in place_prompt.lower():
-            arx.step_lift(20.0)
+        step_base_duration(arx, 0.0, 0.0, -1.0, duration=3.1)
+        # if "first" in place_prompt.lower():
+        #     arx.step_lift(14.0)
+        # elif "second" in place_prompt.lower():
+        #     arx.step_lift(17.0)
+        # elif "top" in place_prompt.lower():
+        #     arx.step_lift(20.0)
+        # else:
+        #     arx.step_lift(14.0)
+        if "shelf" in place_prompt.lower():
+            arx.step_lift(0.0)
         else:
             arx.step_lift(14.0)
         _, _, place_arm = single_arm_pick_place(
@@ -124,6 +131,7 @@ def smart_shelf_search(
             item_type="normal object",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
+
         )
         arx.set_special_mode(1)
         if place_arm is None:
@@ -166,14 +174,14 @@ def main() -> None:
     try:
         arx.reset()
         search_prompts = [
-            "a tennis ball",
+            "a blue object behind a rubik's cube",
             "a pink soda can",
-            "a blue box",
+            "a tennis ball",
         ]
         place_prompts = [
-            "the center part of the first floor on shelf",
+            "a blue square plate",
             "the right part of the second floor on shelf",
-            "the left part of the third floor on shelf",
+            "a blue square plate",
         ]
 
         for search_prompt, place_prompt in zip(search_prompts, place_prompts):
