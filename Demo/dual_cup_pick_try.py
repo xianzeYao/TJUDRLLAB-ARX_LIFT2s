@@ -297,7 +297,7 @@ def main() -> None:
         max_v_rpy=0.45,
         max_a_rpy=1.00,
         camera_type="all",
-        camera_view=("camera_h",),
+        camera_view=("camera_l", "camera_h", "camera_r"),
         img_size=(640, 480),
     )
     try:

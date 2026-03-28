@@ -69,7 +69,7 @@ def smart_shelf_search(
             pick_prompt=search_prompt,
             place_prompt="",
             arm_side="fit",
-            item_type="cup",
+            item_type="normal object",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
@@ -108,8 +108,12 @@ def smart_shelf_search(
                 "place_arm": None,
             }
         step_base_duration(arx, 0.0, 0.0, -1.0, duration=3.2)
-        if "shelf" in place_prompt.lower():
-            arx.step_lift(0.0)
+        if "first" in place_prompt.lower():
+            arx.step_lift(14.0)
+        elif "second" in place_prompt.lower():
+            arx.step_lift(17.0)
+        elif "third" in place_prompt.lower():
+            arx.step_lift(20.0)
         else:
             arx.step_lift(14.0)
         _, _, place_arm = single_arm_pick_place(
@@ -117,7 +121,7 @@ def smart_shelf_search(
             pick_prompt="",
             place_prompt=place_prompt,
             arm_side=pick_arm,
-            item_type="cup",
+            item_type="normal object",
             debug=debug_pick_place,
             depth_median_n=depth_median_n,
         )
@@ -156,7 +160,7 @@ def main() -> None:
         max_v_rpy=0.45,
         max_a_rpy=1.00,
         camera_type="all",
-        camera_view=("camera_h",),
+        camera_view=("camera_l", "camera_h", "camera_r"),
         img_size=(640, 480),
     )
     try:
@@ -167,9 +171,9 @@ def main() -> None:
             "a blue box",
         ]
         place_prompts = [
-            "a blue square plate",
+            "the center part of the first floor on shelf",
             "the right part of the second floor on shelf",
-            "a blue square plate",
+            "the left part of the third floor on shelf",
         ]
 
         for search_prompt, place_prompt in zip(search_prompts, place_prompts):
@@ -177,7 +181,7 @@ def main() -> None:
                 arx=arx,
                 first_nav_height=14.0,
                 search_prompt=search_prompt,
-                nav_table_prompt="a red dot on the floor",
+                nav_table_prompt="a brown coaster on the floor",
                 place_prompt=place_prompt,
                 rotate_recover=True,
                 nav_debug=False,

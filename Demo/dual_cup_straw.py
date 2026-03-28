@@ -106,7 +106,7 @@ def main():
                       max_v_xyz=0.15, max_a_xyz=0.20,
                       max_v_rpy=0.5, max_a_rpy=1.00,
                       camera_type="all",
-                      camera_view=("camera_h",),
+                      camera_view=("camera_l", "camera_h", "camera_r"),
                       img_size=(640, 480))
     try:
         single_arm_pick_place(

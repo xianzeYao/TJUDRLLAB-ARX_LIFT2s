@@ -238,7 +238,7 @@ def on_target_found(
         pick_prompt=object_desc,
         place_prompt="",
         arm_side=pick_side,
-        item_type="cup",
+        item_type="normal object",
         debug=debug_pick_place,
         depth_median_n=depth_median_n,
     )
@@ -514,7 +514,7 @@ def main() -> None:
         max_v_rpy=0.45,
         max_a_rpy=1.00,
         camera_type="all",
-        camera_view=("camera_h",),
+        camera_view=("camera_l", "camera_h", "camera_r"),
         img_size=(640, 480),
     )
     try:
@@ -577,7 +577,7 @@ def main() -> None:
                 pick_prompt="",
                 place_prompt=f"the {result.arm_used} part of square white plate",
                 arm_side=result.arm_used,
-                item_type="cup",
+                item_type="normal object",
                 debug=True,
                 depth_median_n=5,
             )

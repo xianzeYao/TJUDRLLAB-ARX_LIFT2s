@@ -13,6 +13,10 @@ from motion_pick_place_deepbox import (
     build_pick_deepbox_sequence,
     build_place_deepbox_sequence,
 )
+from motion_pick_place_normal_object import (
+    build_pick_normal_object_sequence,
+    build_place_normal_object_sequence,
+)
 from motion_pick_place_straw import (
     build_pick_straw_sequence,
     build_place_straw_sequence,
@@ -249,5 +253,27 @@ def execute_pick_place_deepbox_sequence(
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_deepbox_sequence(place_ref, arm=arm)
+        for act in place_seq:
+            arx.step_smooth_eef(act)
+
+
+def execute_pick_place_normal_object_sequence(
+    arx,
+    pick_ref: Optional[np.ndarray],
+    place_ref: Optional[np.ndarray],
+    arm: str,
+    do_pick: bool = True,
+    do_place: bool = True,
+) -> None:
+    if do_pick:
+        if pick_ref is None:
+            raise ValueError("pick_ref 为空")
+        pick_seq = build_pick_normal_object_sequence(pick_ref, arm=arm)
+        for act in pick_seq:
+            arx.step_smooth_eef(act)
+    if do_place:
+        if place_ref is None:
+            raise ValueError("place_ref 为空")
+        place_seq = build_place_normal_object_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step_smooth_eef(act)
