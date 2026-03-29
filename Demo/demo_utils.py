@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import sys
 import time
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
@@ -21,6 +23,11 @@ from motion_pick_place_straw import (
     build_pick_straw_sequence,
     build_place_straw_sequence,
 )
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DEPLOYMENT_DIR = ROOT_DIR / "Deployment"
+if str(DEPLOYMENT_DIR) not in sys.path:
+    sys.path.append(str(DEPLOYMENT_DIR))
 
 LIFT_SAMPLES = np.array([0.0, 5.0, 10.0, 15.0, 20.0], dtype=np.float32)
 REF_HEIGHT_SAMPLES_M = np.array(
@@ -170,6 +177,25 @@ def step_base_duration(
     arx.step_base(vx, vy, vz)
     time.sleep(duration)
     arx.step_base(0.0, 0.0, 0.0)
+
+
+def run_push_away(arx) -> None:
+    from testACT_parallel import run_act
+
+    run_act(
+        arx=arx,
+        model_path="/home/arx/Arx_Lift2s/Deployment/models/push_away_act",
+        arm_side="right",
+        hz=20.0,
+        chunk_size=30,
+        max_steps=250,
+        temporal_ensemble_coeff=0.01,
+    )
+    success, error_message = arx.set_special_mode(1, side="right")
+    if not success:
+        raise RuntimeError(
+            f"failed to reset right arm after push_away: {error_message}"
+        )
 
 
 def estimate_lift_from_goal_z(

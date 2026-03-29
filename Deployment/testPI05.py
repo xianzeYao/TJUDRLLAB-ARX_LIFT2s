@@ -115,6 +115,7 @@ def run_pi05(
             output_dir=dry_run_dir,
             task=task,
             show_plot=show_plot,
+            rollout_mode="chunked",
         )
 
     if arx is None:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 
-from demo_utils import step_base_duration
+from demo_utils import run_push_away, step_base_duration
 from nav_goal import nav_to_goal
 from single_arm_pick_place import single_arm_pick_place
 
@@ -42,13 +42,17 @@ def smart_shelf_search(
     place_arm = None
 
     try:
+        if "behind" in search_prompt.lower():
+            distance = 0.4
+        else:
+            distance = 0.45
         first_nav_result = nav_to_goal(
             arx=arx,
             goal=search_prompt,
-            distance=0.45,
+            distance=distance,
             lift_height=first_nav_height,
             rotate_recover=rotate_recover,
-            offset=0.22,
+            offset=0.36,
             use_goal_z_for_lift=True,
             continuous=False,
             debug_raw=nav_debug,
@@ -64,6 +68,7 @@ def smart_shelf_search(
                 "place_arm": None,
             }
         if "blue" in search_prompt.lower():
+            run_push_away(arx)
             search_prompt = "a blue box"
         _, _, pick_arm = single_arm_pick_place(
             arx=arx,
@@ -123,10 +128,13 @@ def smart_shelf_search(
             arx.step_lift(0.0)
         else:
             arx.step_lift(14.0)
+        resolved_place_prompt = place_prompt
+        if "xx" in resolved_place_prompt and pick_arm in {"left", "right"}:
+            resolved_place_prompt = resolved_place_prompt.replace("xx", pick_arm, 1)
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
-            place_prompt=place_prompt,
+            place_prompt=resolved_place_prompt,
             arm_side=pick_arm,
             item_type="normal object",
             debug=debug_pick_place,
@@ -175,12 +183,12 @@ def main() -> None:
         arx.reset()
         search_prompts = [
             "a blue object behind a rubik's cube",
-            "a pink soda can",
-            "a tennis ball",
+            "a yellow glue",
+            "a brush",
         ]
         place_prompts = [
             "a blue square plate",
-            "the right part of the second floor on shelf",
+            "the xx part of the second floor on shelf",
             "a blue square plate",
         ]
 
@@ -193,7 +201,7 @@ def main() -> None:
                 place_prompt=place_prompt,
                 rotate_recover=True,
                 nav_debug=False,
-                debug_pick_place=False,
+                debug_pick_place=True,
                 depth_median_n=10,
             )
             print(f"{search_prompt}: {result}")

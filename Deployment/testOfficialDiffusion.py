@@ -27,6 +27,7 @@ from deployment_utils import (  # noqa: E402
     infer_action_dim,
     infer_visual_feature_keys,
     resolve_pretrained_model_path,
+    run_open_loop_dryrun,
     unwrap_action_sequence,
 )
 
@@ -51,15 +52,40 @@ def load_diffusion_policy(model_path: str, device: str = "cuda"):
 
 
 def run_official_diffusion(
-    arx: ARXRobotEnv,
+    arx: ARXRobotEnv | None,
     model_path: str,
     arm_side: str = "right",
     hz: float = 10.0,
     max_steps: int = 0,
     device: str = "cuda",
     dry_run: bool = False,
+    dry_run_dir: str = "dryrun_records",
+    dataset_root: str | None = None,
+    episode_index: int = 0,
+    show_plot: bool = False,
 ):
     """Run diffusion with the official single-step `select_action()` logic."""
+    if dataset_root is not None and not dry_run:
+        raise ValueError(
+            "`dataset_root` is only supported when `dry_run=True`.")
+
+    if dry_run and dataset_root:
+        return run_open_loop_dryrun(
+            model_path=model_path,
+            dataset_root=dataset_root,
+            episode_index=episode_index,
+            policy_type="diffusion",
+            max_steps=max_steps,
+            device=device,
+            output_dir=dry_run_dir,
+            show_plot=show_plot,
+            rollout_mode="official",
+        )
+
+    if arx is None:
+        raise ValueError(
+            "`arx` must be provided when `dataset_root` is not set.")
+
     policy, preprocess, postprocess, rgb_camera_keys, depth_camera_keys, action_dim = load_diffusion_policy(
         model_path,
         device=device,
@@ -113,30 +139,42 @@ def run_official_diffusion(
 
 
 def main() -> None:
-    arx = ARXRobotEnv(
-        duration_per_step=1.0 / 20.0,
-        min_steps=20,
-        max_v_xyz=0.25,
-        max_a_xyz=0.20,
-        max_v_rpy=0.3,
-        max_a_rpy=1.00,
-        camera_type="all",
-        camera_view=("camera_h", "camera_r"),
-        img_size=(640, 480),
-    )
+    dry_run = False
+    dataset_root = None
+    # dataset_root = "/home/arx/Arx_Lift2s/Collect/lerobot_v3/push_away_cube_v2"
+
+    arx = None
+    if not (dry_run and dataset_root):
+        arx = ARXRobotEnv(
+            duration_per_step=1.0 / 20.0,
+            min_steps=20,
+            max_v_xyz=0.25,
+            max_a_xyz=0.20,
+            max_v_rpy=0.3,
+            max_a_rpy=1.00,
+            camera_type="all",
+            camera_view=("camera_h", "camera_r"),
+            img_size=(640, 480),
+        )
     try:
-        arx.reset()
-        arx.step_lift(14.5)
+        if arx is not None:
+            arx.reset()
+            arx.step_lift(12.5)
         run_official_diffusion(
             arx=arx,
-            model_path="/home/arx/Arx_Lift2s/Deployment/models/arx_diffusion_30k",
+            model_path="/home/arx/Arx_Lift2s/Deployment/models/push_away_diffusion",
             arm_side="right",
             hz=20.0,
-            max_steps=500,
-            dry_run=False,
+            max_steps=150,
+            dry_run=dry_run,
+            dataset_root=dataset_root,
+            episode_index=0,
+            dry_run_dir="dryrun_records/push_away_diffuion",
+            show_plot=False,
         )
     finally:
-        arx.close()
+        if arx is not None:
+            arx.close()
 
 
 if __name__ == "__main__":

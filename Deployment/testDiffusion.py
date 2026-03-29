@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diffusion deployment helper for ARX."""
+"""Chunked diffusion deployment helper for ARX."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import time
 from collections import deque
 from pathlib import Path
 
+import numpy as np
 import torch
 
 
@@ -57,7 +58,16 @@ def load_diffusion_policy(model_path: str, device: str = "cuda"):
     rgb_camera_keys, depth_camera_keys = infer_visual_feature_keys(policy)
     action_dim = infer_action_dim(policy)
     chunk_length = infer_chunk_length(policy)
-    return policy, preprocess, postprocess, expected_keys, rgb_camera_keys, depth_camera_keys, action_dim, chunk_length
+    return (
+        policy,
+        preprocess,
+        postprocess,
+        expected_keys,
+        rgb_camera_keys,
+        depth_camera_keys,
+        action_dim,
+        chunk_length,
+    )
 
 
 def _predict_diffusion_chunk(
@@ -95,19 +105,19 @@ def run_diffusion(
     arx: ARXRobotEnv | None,
     model_path: str,
     arm_side: str = "right",
-    hz: float = 10.0,
+    hz: float = 20.0,
     chunk_size: int | None = None,
     replan_interval: int = 0,
     chunk_method: str = "replace",
     max_steps: int = 0,
     device: str = "cuda",
     dry_run: bool = False,
-    dry_run_dir: str = "dryrun_records",
+    dry_run_dir: str = "dryrun_records/push_away_diffuion_chunked",
     dataset_root: str | None = None,
     episode_index: int = 0,
     show_plot: bool = False,
 ):
-    """Run Diffusion on a provided ARXRobotEnv."""
+    """Run diffusion with deployment-side chunk/replan logic."""
     if dataset_root is not None and not dry_run:
         raise ValueError(
             "`dataset_root` is only supported when `dry_run=True`.")
@@ -125,14 +135,23 @@ def run_diffusion(
             device=device,
             output_dir=dry_run_dir,
             show_plot=show_plot,
+            rollout_mode="chunked",
         )
 
     if arx is None:
         raise ValueError(
-            "`arx` must be provided when `dry_run_root` is not set.")
+            "`arx` must be provided when `dataset_root` is not set.")
 
-    policy, preprocess, postprocess, expected_keys, rgb_camera_keys, depth_camera_keys, action_dim, model_chunk_length = load_diffusion_policy(
-        model_path, device=device)
+    (
+        policy,
+        preprocess,
+        postprocess,
+        expected_keys,
+        rgb_camera_keys,
+        depth_camera_keys,
+        action_dim,
+        model_chunk_length,
+    ) = load_diffusion_policy(model_path, device=device)
     del expected_keys
 
     policy.reset()
@@ -149,7 +168,7 @@ def run_diffusion(
         )
 
     dry_run_records = []
-    pending_actions: deque = deque()
+    pending_actions: deque[np.ndarray] = deque()
 
     warmup_frames, warmup_status = arx.get_camera(
         save_dir=None,
@@ -175,10 +194,10 @@ def run_diffusion(
     )
 
     print(
-        f"Diffusion deployment started: side={arm_side}, cameras={rgb_camera_keys}, "
+        f"Diffusion chunked deployment started: side={arm_side}, cameras={rgb_camera_keys}, "
         f"depth_cameras={depth_camera_keys}, action_dim={action_dim}, chunk_length={chunk_length}, "
-        f"model_chunk_length={model_chunk_length}, "
-        f"hz={hz:.2f}, replan_interval={replan_interval}, "
+        f"model_chunk_length={model_chunk_length}, hz={hz:.2f}, "
+        f"replan_interval={replan_interval}, "
         f"chunk_method={effective_chunk_method or 'disabled'}, dry_run={dry_run}"
     )
     step_idx = 0
@@ -218,11 +237,16 @@ def run_diffusion(
                     list(pending_actions),
                     new_actions,
                     chunk_method=effective_chunk_method if (
-                        pending_actions and effective_chunk_method) else "replace",
+                        pending_actions and effective_chunk_method
+                    ) else "replace",
                 )
                 pending_actions = deque(merged_actions)
                 steps_since_replan = 0
                 latency_ms = (time.perf_counter() - t0) * 1000.0
+
+            if not pending_actions:
+                raise RuntimeError(
+                    f"No predicted action available at step {step_idx}")
 
             action = pending_actions.popleft()
             control_payload = build_control_payload(action, arm_side)
@@ -241,8 +265,7 @@ def run_diffusion(
                 print(
                     f"[step {step_idx:05d}] action={action.round(4)} latency_ms={latency_ms:.1f}"
                 )
-
-            if not dry_run:
+            else:
                 arx.step_smooth_joint(control_payload)
 
             elapsed = time.perf_counter() - t0
@@ -259,35 +282,43 @@ def run_diffusion(
 def main() -> None:
     dry_run = False
     dataset_root = None
-    # dataset_root = "Collect/lerobot_v3/gravity_single4IL"
+    # dataset_root = "/home/arx/Arx_Lift2s/Collect/lerobot_v3/push_away_cube_v2"
 
-    arx = ARXRobotEnv(
-        duration_per_step=1.0 / 20.0,
-        min_steps=20,
-        max_v_xyz=0.25,
-        max_a_xyz=0.20,
-        max_v_rpy=0.3,
-        max_a_rpy=1.00,
-        camera_type="all",
-        camera_view=("camera_h", "camera_r"),
-        img_size=(640, 480),
-    )
+    arx = None
+    if not (dry_run and dataset_root):
+        arx = ARXRobotEnv(
+            duration_per_step=1.0 / 20.0,
+            min_steps=20,
+            max_v_xyz=0.25,
+            max_a_xyz=0.20,
+            max_v_rpy=0.3,
+            max_a_rpy=1.00,
+            camera_type="all",
+            camera_view=("camera_h", "camera_r"),
+            img_size=(640, 480),
+        )
     try:
-        if not dry_run:
+        if arx is not None:
             arx.reset()
-            arx.step_lift(14.5)
+            arx.step_lift(12.5)
         run_diffusion(
             arx=arx,
-            model_path="/home/arx/Arx_Lift2s/Deployment/models/arx_diffusion_30k",
+            model_path="/home/arx/Arx_Lift2s/Deployment/models/push_away_diffusion",
             arm_side="right",
             hz=20.0,
-            chunk_size=50,
-            replan_interval=50,
+            chunk_size=12,
+            replan_interval=12,
             chunk_method="replace",
-            max_steps=500,
+            max_steps=150,
+            dry_run=dry_run,
+            dataset_root=dataset_root,
+            episode_index=0,
+            dry_run_dir="dryrun_records/push_away_diffuion_chunked",
+            show_plot=False,
         )
     finally:
-        arx.close()
+        if arx is not None:
+            arx.close()
 
 
 if __name__ == "__main__":

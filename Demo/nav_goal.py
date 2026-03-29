@@ -350,11 +350,6 @@ def nav_to_goal(
                     print("Refresh requested.")
                     continue
 
-            executed_rotations = execute_nav_actions(
-                arx,
-                actions,
-                distance=distance,
-            )
             if use_goal_z_for_lift:
                 base_status = arx.get_robot_status().get("base")
                 current_lift = float(
@@ -370,6 +365,11 @@ def nav_to_goal(
                     f"target_lift={estimated_lift:.3f}"
                 )
                 arx.step_lift(estimated_lift)
+            executed_rotations = execute_nav_actions(
+                arx,
+                actions,
+                distance=distance,
+            )
             if rotate_recover:
                 recover_rotations(arx, executed_rotations)
             last_result = (goal_pw, actions)

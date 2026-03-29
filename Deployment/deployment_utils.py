@@ -596,6 +596,24 @@ def _load_action_names(dataset_root: Path) -> list[str]:
     return [f"action_{idx}" for idx in range(7)]
 
 
+def _get_policy_action_queue_state(policy: Any) -> tuple[int | None, int | None]:
+    action_queue = getattr(policy, "_action_queue", None)
+    if action_queue is not None:
+        maxlen = getattr(action_queue, "maxlen", None)
+        return len(action_queue), int(maxlen) if maxlen is not None else len(action_queue)
+
+    queues = getattr(policy, "_queues", None)
+    if isinstance(queues, dict):
+        from lerobot.utils.constants import ACTION
+
+        action_queue = queues.get(ACTION)
+        if action_queue is not None:
+            maxlen = getattr(action_queue, "maxlen", None)
+            return len(action_queue), int(maxlen) if maxlen is not None else len(action_queue)
+
+    return None, None
+
+
 def _scalar(value: Any) -> float:
     if torch.is_tensor(value):
         return float(value.detach().cpu().reshape(-1)[0].item())
@@ -842,8 +860,14 @@ def run_open_loop_dryrun(
     task: str | None = None,
     video_backend: str = "pyav",
     show_plot: bool = False,
+    rollout_mode: str = "official",
 ) -> dict[str, Path]:
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+    if rollout_mode not in {"chunked", "official"}:
+        raise ValueError(
+            f"Unsupported rollout_mode={rollout_mode!r}. Expected one of: chunked, official."
+        )
 
     dataset_root = Path(dataset_root).resolve()
     if not dataset_root.is_dir():
@@ -860,12 +884,21 @@ def run_open_loop_dryrun(
     )
 
     bundle = _load_policy_bundle(policy_type, model_path, device=device)
-    chunk_length = resolve_chunk_length(bundle.model_chunk_length, chunk_size)
-    replan_interval, effective_chunk_method = normalize_replan_settings(
-        chunk_length=chunk_length,
-        replan_interval=replan_interval,
-        chunk_method=chunk_method,
-    )
+    bundle.policy.reset()
+    chunk_length = bundle.model_chunk_length
+    effective_chunk_method: str | None = None
+    summary_replan_interval: int | None = None
+    summary_chunk_method: str | None = None
+    if rollout_mode == "chunked":
+        chunk_length = resolve_chunk_length(
+            bundle.model_chunk_length, chunk_size)
+        replan_interval, effective_chunk_method = normalize_replan_settings(
+            chunk_length=chunk_length,
+            replan_interval=replan_interval,
+            chunk_method=chunk_method,
+        )
+        summary_replan_interval = int(replan_interval)
+        summary_chunk_method = effective_chunk_method or "disabled"
 
     total_steps = len(dataset)
     if total_steps <= 0:
@@ -897,17 +930,19 @@ def run_open_loop_dryrun(
     dataset_name = dataset_root.name
     stem = f"{model_name}_{dataset_name}_ep{episode_index:03d}_{stamp}"
 
-    records_path = output_root / f"{stem}.json"
-    summary_path = output_root / f"{stem}_summary.json"
-    figure_path = output_root / f"{stem}.png"
-    per_dim_dir = output_root / f"{stem}_per_dim"
+    per_dim_dir = output_root / f"{stem}_dry_run"
+    records_path = per_dim_dir / f"{stem}.json"
+    summary_path = per_dim_dir / f"{stem}_summary.json"
+    figure_path = per_dim_dir / f"{stem}.png"
 
     print(
-        f"Open-loop dry-run started: policy_type={policy_type}, model={model_path}, "
+        f"Open-loop dry-run started: policy_type={policy_type}, rollout_mode={rollout_mode}, "
+        f"model={model_path}, "
         f"dataset={dataset_root}, repo_id={repo_id}, episode={episode_index}, "
-        f"steps={total_steps}, action_dim={bundle.action_dim}, chunk_length={chunk_length}, "
-        f"model_chunk_length={bundle.model_chunk_length}, replan_interval={replan_interval}, "
-        f"chunk_method={effective_chunk_method or 'disabled'}, "
+        f"steps={total_steps}, action_dim={bundle.action_dim}, "
+        f"chunk_length={chunk_length}, model_chunk_length={bundle.model_chunk_length}, "
+        f"replan_interval={summary_replan_interval}, "
+        f"chunk_method={summary_chunk_method}, "
         f"rgb_cameras={bundle.rgb_camera_keys}, depth_cameras={bundle.depth_camera_keys}, "
         f"device={bundle.device}"
     )
@@ -918,6 +953,7 @@ def run_open_loop_dryrun(
     pending_actions: deque[np.ndarray] = deque()
     steps_since_replan = 0
     plan_origin_step = 0
+    official_plan_origin_step = 0
     episode_start_ts = _scalar(sample0["timestamp"])
     live_plotter = None
     live_time_s: list[float] = []
@@ -936,61 +972,91 @@ def run_open_loop_dryrun(
     for step_idx in range(total_steps):
         item = sample0 if step_idx == 0 else dataset[step_idx]
 
-        latency_ms = 0.0
-        should_replan = not pending_actions
-        if not should_replan and replan_interval > 0 and steps_since_replan >= replan_interval:
-            should_replan = True
+        payload = _build_policy_input(
+            item=item,
+            expected_keys=bundle.expected_keys,
+            policy_type=policy_type,
+            task_text=task_text,
+        )
+        batch = bundle.preprocess(dict(payload))
 
-        if should_replan:
-            plan_origin_step = step_idx
+        if rollout_mode == "official":
+            queue_len_before, _ = _get_policy_action_queue_state(bundle.policy)
             t0 = time.perf_counter()
-            payload = _build_policy_input(
-                item=item,
-                expected_keys=bundle.expected_keys,
-                policy_type=policy_type,
-                task_text=task_text,
-            )
-            batch = bundle.preprocess(dict(payload))
-            if policy_type == "diffusion":
-                from lerobot.policies.utils import populate_queues
-                from lerobot.utils.constants import ACTION
-                from lerobot.utils.constants import OBS_IMAGES
-
-                batch = dict(batch)
-                batch.pop(ACTION, None)
-                if bundle.policy.config.image_features:
-                    batch[OBS_IMAGES] = torch.stack(
-                        [batch[key]
-                            for key in bundle.policy.config.image_features],
-                        dim=-4,
-                    )
-
-                bundle.policy._queues = populate_queues(
-                    bundle.policy._queues, batch)
             with torch.inference_mode():
-                pred = bundle.policy.predict_action_chunk(batch)
+                pred = bundle.policy.select_action(batch)
                 pred = bundle.postprocess(pred)
-            new_actions = unwrap_action_sequence(
-                pred,
-                action_dim=bundle.action_dim,
-                max_action_steps=chunk_length,
-            )
-            merged_actions = merge_action_chunks(
-                list(pending_actions),
-                new_actions,
-                chunk_method=effective_chunk_method if (
-                    pending_actions and effective_chunk_method) else "replace",
-            )
-            pending_actions = deque(merged_actions)
-            steps_since_replan = 0
             latency_ms = (time.perf_counter() - t0) * 1000.0
+            pred_action = np.asarray(
+                unwrap_action_sequence(
+                    pred,
+                    action_dim=bundle.action_dim,
+                    max_action_steps=1,
+                )[0],
+                dtype=np.float32,
+            ).reshape(-1)
+            queue_len_after, queue_capacity = _get_policy_action_queue_state(
+                bundle.policy)
+            if queue_capacity is None or queue_len_after is None:
+                plan_origin_step = step_idx
+                chunk_offset = 0
+            else:
+                if queue_len_before == 0:
+                    official_plan_origin_step = step_idx
+                plan_origin_step = official_plan_origin_step
+                chunk_offset = max(0, int(queue_capacity) -
+                                   int(queue_len_after) - 1)
+        else:
+            latency_ms = 0.0
+            should_replan = not pending_actions
+            if not should_replan and replan_interval > 0 and steps_since_replan >= replan_interval:
+                should_replan = True
 
-        if not pending_actions:
-            raise RuntimeError(
-                f"No predicted action available at step {step_idx}")
+            if should_replan:
+                plan_origin_step = step_idx
+                t0 = time.perf_counter()
+                if policy_type == "diffusion":
+                    from lerobot.policies.utils import populate_queues
+                    from lerobot.utils.constants import ACTION
+                    from lerobot.utils.constants import OBS_IMAGES
 
-        pred_action = np.asarray(
-            pending_actions.popleft(), dtype=np.float32).reshape(-1)
+                    batch = dict(batch)
+                    batch.pop(ACTION, None)
+                    if bundle.policy.config.image_features:
+                        batch[OBS_IMAGES] = torch.stack(
+                            [batch[key]
+                                for key in bundle.policy.config.image_features],
+                            dim=-4,
+                        )
+
+                    bundle.policy._queues = populate_queues(
+                        bundle.policy._queues, batch)
+                with torch.inference_mode():
+                    pred = bundle.policy.predict_action_chunk(batch)
+                    pred = bundle.postprocess(pred)
+                new_actions = unwrap_action_sequence(
+                    pred,
+                    action_dim=bundle.action_dim,
+                    max_action_steps=chunk_length,
+                )
+                merged_actions = merge_action_chunks(
+                    list(pending_actions),
+                    new_actions,
+                    chunk_method=effective_chunk_method if (
+                        pending_actions and effective_chunk_method) else "replace",
+                )
+                pending_actions = deque(merged_actions)
+                steps_since_replan = 0
+                latency_ms = (time.perf_counter() - t0) * 1000.0
+
+            if not pending_actions:
+                raise RuntimeError(
+                    f"No predicted action available at step {step_idx}")
+
+            pred_action = np.asarray(
+                pending_actions.popleft(), dtype=np.float32).reshape(-1)
+            chunk_offset = step_idx - plan_origin_step
+
         gt_action = _vector(item["action"])
         rel_time_s = _scalar(item["timestamp"]) - episode_start_ts
         abs_error = np.abs(pred_action - gt_action)
@@ -1003,7 +1069,7 @@ def run_open_loop_dryrun(
                 "time_s": rel_time_s,
                 "dataset_timestamp_s": _scalar(item["timestamp"]),
                 "plan_origin_step": plan_origin_step,
-                "chunk_offset": step_idx - plan_origin_step,
+                "chunk_offset": chunk_offset,
                 "latency_ms": latency_ms,
                 "task": str(item.get("task", task_text or "")),
                 "gt_action": gt_action,
@@ -1030,7 +1096,8 @@ def run_open_loop_dryrun(
                 f"pred={np.round(pred_action, 4).tolist()}"
             )
 
-        steps_since_replan += 1
+        if rollout_mode == "chunked":
+            steps_since_replan += 1
 
     time_s = np.asarray([record["time_s"]
                         for record in records], dtype=np.float32)
@@ -1043,6 +1110,7 @@ def run_open_loop_dryrun(
 
     summary = {
         "policy_type": policy_type,
+        "rollout_mode": rollout_mode,
         "model_path": str(model_path),
         "dataset_root": str(dataset_root),
         "repo_id": repo_id,
@@ -1050,8 +1118,8 @@ def run_open_loop_dryrun(
         "total_steps": int(total_steps),
         "chunk_length": int(chunk_length),
         "model_chunk_length": int(bundle.model_chunk_length),
-        "replan_interval": int(replan_interval),
-        "chunk_method": effective_chunk_method or "disabled",
+        "replan_interval": summary_replan_interval,
+        "chunk_method": summary_chunk_method,
         "device": str(bundle.device),
         "task": task_text or str(sample0.get("task", "")).strip(),
         "action_names": action_names,
