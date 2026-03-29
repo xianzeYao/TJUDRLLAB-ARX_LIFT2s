@@ -5,9 +5,10 @@ import select
 import sys
 import termios
 import time
-from typing import List, Literal, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import cv2
+import numpy as np
 
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
@@ -73,9 +74,64 @@ def _vote_goal_presence(
     return true_count > false_count
 
 
-def _select_goal_point(points, depth, offset: float = 0.5):
+def _build_rotate_search_roi_polygon(
+    image_shape: tuple[int, ...],
+) -> np.ndarray:
+    height, width = image_shape[:2]
+    top_y = int(round(height / 3.0))
+    bottom_y = height - 1
+    top_left_x = int(round(width / 3.0))
+    top_right_x = int(round(width * 2.0 / 3.0))
+    bottom_left_x = 0
+    bottom_right_x = width - 1
+    return np.array(
+        [
+            [top_left_x, top_y],
+            [top_right_x, top_y],
+            [bottom_right_x, bottom_y],
+            [bottom_left_x, bottom_y],
+        ],
+        dtype=np.int32,
+    )
+
+
+def _apply_roi_focus(
+    color: np.ndarray,
+    roi_polygon: np.ndarray,
+) -> np.ndarray:
+    mask = np.zeros(color.shape[:2], dtype=np.uint8)
+    cv2.fillConvexPoly(mask, roi_polygon, 255)
+    focused = np.zeros_like(color)
+    focused[mask == 255] = color[mask == 255]
+    return focused
+
+
+def _point_in_roi(
+    point,
+    roi_polygon: Optional[np.ndarray],
+) -> bool:
+    if roi_polygon is None:
+        return True
+    u, v = float(point[0]), float(point[1])
+    return cv2.pointPolygonTest(
+        roi_polygon.reshape((-1, 1, 2)),
+        (u, v),
+        False,
+    ) >= 0
+
+
+def _select_goal_point(
+    points,
+    depth,
+    offset: float = 0.5,
+    roi_polygon: Optional[np.ndarray] = None,
+):
     valid_goals = []
     for point in points:
+        if not _point_in_roi(point, roi_polygon):
+            u, v = int(round(point[0])), int(round(point[1]))
+            print(f"预测像素 {(u, v)} 不在 rotate_search ROI 内，自动刷新")
+            continue
         goal_pw = pixel_to_base_point_safe(
             point, depth, robot_part="center", offset=[0.0, offset, 0.0])
         if goal_pw is None:
@@ -94,8 +150,17 @@ def _confirm_debug_view(
     color,
     points,
     goal_pixel,
+    roi_polygon: Optional[np.ndarray] = None,
 ) -> Literal[True, False, None]:
     vis = color.copy()
+    if roi_polygon is not None:
+        cv2.polylines(
+            vis,
+            [roi_polygon.reshape((-1, 1, 2))],
+            isClosed=True,
+            color=(255, 255, 0),
+            thickness=2,
+        )
     for point in points:
         cv2.circle(
             vis,
@@ -151,7 +216,7 @@ def nav_to_goal(
     last_result = None
     rotating_search = False
     consecutive_true_count = 0
-    consecutive_true_required = 5
+    consecutive_true_required = 3
 
     def _start_rotate_search() -> None:
         nonlocal rotating_search
@@ -185,8 +250,18 @@ def nav_to_goal(
                     continue
                 raise RuntimeError("failed to read camera_h color frame")
 
+            rotate_search_roi_polygon = (
+                _build_rotate_search_roi_polygon(color.shape)
+                if rotating_search
+                else None
+            )
+            presence_color = (
+                _apply_roi_focus(color, rotate_search_roi_polygon)
+                if rotate_search_roi_polygon is not None
+                else color
+            )
             detect_goal = _vote_goal_presence(
-                color, goal=goal, vote_times=vote_times)
+                presence_color, goal=goal, vote_times=vote_times)
             if not detect_goal:
                 consecutive_true_count = 0
                 print(f"No goal detected for: {goal}")
@@ -209,6 +284,7 @@ def nav_to_goal(
                     continue
             else:
                 consecutive_true_count = 0
+            goal_point_roi_polygon = rotate_search_roi_polygon
             _stop_rotate_search()
             consecutive_true_count = 0
 
@@ -243,6 +319,7 @@ def nav_to_goal(
                     points,
                     depth,
                     offset=offset,
+                    roi_polygon=goal_point_roi_polygon,
                 )
             except ValueError as exc:
                 print(exc)
@@ -259,7 +336,12 @@ def nav_to_goal(
             actions = path_to_actions(path)
 
             if debug_raw:
-                debug_result = _confirm_debug_view(color, points, goal_pixel)
+                debug_result = _confirm_debug_view(
+                    color,
+                    points,
+                    goal_pixel,
+                    roi_polygon=goal_point_roi_polygon,
+                )
                 if debug_result is None:
                     _stop_rotate_search()
                     print("Stop signal received.")

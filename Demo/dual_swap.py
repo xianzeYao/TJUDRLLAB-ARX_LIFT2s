@@ -2,6 +2,8 @@ import time
 import sys
 import select
 import termios
+import re
+from dataclasses import dataclass
 from typing import Optional
 
 import cv2
@@ -10,7 +12,11 @@ import numpy as np
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
 from arx_ros2_env import ARXRobotEnv  # noqa
-from arx_pointing import predict_point_from_rgb
+from arx_pointing import (
+    predict_multi_points_from_multi_image,
+    predict_multi_points_from_rgb,
+    predict_point_from_rgb,
+)
 from motion_swap import build_swap_sequence
 from point2pos_utils import (
     get_aligned_frames,
@@ -38,46 +44,203 @@ def _restore_keyboard(old_settings):
     termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
 
-def _confirm_continue_swap(sweep_idx: int, max_sweeps: int) -> bool:
-    win = "dual_swap_confirm"
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    prompt = "Continue sweep or not?"
-    try:
-        while True:
-            panel = np.zeros((120, 900, 3), dtype=np.uint8)
-            cv2.putText(
-                panel,
-                prompt,
-                (20, 55),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 255, 0),
-                2,
-            )
-            cv2.putText(
-                panel,
-                "y: continue   n: stop",
-                (20, 95),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2,
-            )
-            cv2.imshow(win, panel)
+@dataclass
+class SweepJudgeResult:
+    continue_sweep: bool
+    floor_has_target: bool
+    dustpan_gained_target: bool
+    reason: str
 
-            key = _get_key_nonblock()
-            if key in ("y", "Y"):
-                return True
-            if key in ("n", "N"):
-                return False
 
-            cv_key = cv2.waitKey(50) & 0xFF
-            if cv_key in (ord("y"), ord("Y")):
-                return True
-            if cv_key in (ord("n"), ord("N"), 27):
-                return False
-    finally:
-        cv2.destroyWindow(win)
+def _parse_bool(text: Optional[str]) -> Optional[bool]:
+    if text is None:
+        return None
+    normalized = text.strip().lower()
+    if not normalized:
+        return None
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    matches = re.findall(r"\b(true|false)\b", normalized)
+    if not matches:
+        return None
+    return matches[0] == "true"
+
+
+def _vote_single_image_bool(
+    color: np.ndarray,
+    prompt: str,
+    vote_times: int,
+) -> bool:
+    if vote_times <= 0:
+        raise ValueError(f"vote_times must be positive, got {vote_times}")
+
+    true_count = 0
+    false_count = 0
+    for _ in range(vote_times):
+        _, raw = predict_multi_points_from_rgb(
+            image=color,
+            text_prompt="",
+            all_prompt=prompt,
+            assume_bgr=False,
+            temperature=0.0,
+            return_raw=True,
+        )
+        parsed = _parse_bool(raw)
+        if parsed is True:
+            true_count += 1
+        elif parsed is False:
+            false_count += 1
+
+    if true_count == 0 and false_count == 0:
+        raise RuntimeError(f"bool parsing failed. prompt={prompt!r}")
+    return true_count > false_count
+
+
+def _vote_multi_image_bool(
+    images: list[np.ndarray],
+    prompt: str,
+    vote_times: int,
+) -> bool:
+    if vote_times <= 0:
+        raise ValueError(f"vote_times must be positive, got {vote_times}")
+
+    true_count = 0
+    false_count = 0
+    for _ in range(vote_times):
+        _, raw = predict_multi_points_from_multi_image(
+            images=images,
+            text_prompt="",
+            all_prompt=prompt,
+            assume_bgr=(False, False),
+            temperature=0.0,
+            return_raw=True,
+        )
+        parsed = _parse_bool(raw)
+        if parsed is True:
+            true_count += 1
+        elif parsed is False:
+            false_count += 1
+
+    if true_count == 0 and false_count == 0:
+        raise RuntimeError(f"bool parsing failed. prompt={prompt!r}")
+    return true_count > false_count
+
+
+def _build_floor_presence_prompt(object_prompt: str) -> str:
+    return (
+        "This is the current top-camera image during dual sweep. "
+        "The left arm holds the dustpan. The right arm holds the broom. "
+        f'Focus only on objects matching "{object_prompt}". '
+        "Check whether at least one matching object is still on the floor outside the dustpan. "
+        "Ignore any matching object already inside the dustpan, at the dustpan mouth, "
+        "or being lifted / blocked by the broom during the sweep motion. "
+        "Answer True only when a matching object clearly remains on the floor and still needs another sweep. "
+        "Output only True or False."
+    )
+
+
+def _build_dustpan_gain_prompt(object_prompt: str) -> str:
+    return (
+        "Image 1 is the reference image captured after the robot reached the pre-sweep pose. "
+        "Image 2 is the current image after the latest sweep. "
+        "The left arm holds the dustpan. The right arm holds the broom. "
+        f'Focus only on objects matching "{object_prompt}". '
+        "Compare only the dustpan interior and dustpan mouth region between the two images. "
+        "Ignore any matching object that was already inside the dustpan in image 1. "
+        "Do not answer True just because both images already contain trash in the dustpan. "
+        "Answer True only if image 2 shows at least one additional matching object that is newly inside "
+        "the dustpan or clearly crossing into the dustpan mouth compared with image 1. "
+        "Output only True or False."
+    )
+
+
+def _get_top_color_frame(
+    arx: ARXRobotEnv,
+    target_size: tuple[int, int] = (640, 480),
+    max_retries: int = 3,
+    retry_sleep_s: float = 0.1,
+) -> np.ndarray:
+    frames = None
+    for _ in range(max(1, int(max_retries))):
+        frames = arx.get_camera(target_size=target_size, return_status=False)
+        color = frames.get("camera_h_color") if frames else None
+        if color is not None:
+            return color
+        time.sleep(max(0.0, float(retry_sleep_s)))
+
+    available = sorted(frames.keys()) if frames else []
+    raise RuntimeError(
+        "failed to fetch camera_h_color frame, "
+        f"available keys: {available}"
+    )
+
+
+def _judge_continue_swap(
+    arx: ARXRobotEnv,
+    object_prompt: str,
+    reference_color: np.ndarray,
+    vote_times: int,
+    verify_retry_s: float = 0.2,
+) -> SweepJudgeResult:
+    floor_prompt = _build_floor_presence_prompt(object_prompt)
+    dustpan_prompt = _build_dustpan_gain_prompt(object_prompt)
+
+    def _run_once(color: np.ndarray) -> tuple[bool, bool]:
+        floor_has_target = _vote_single_image_bool(
+            color=color,
+            prompt=floor_prompt,
+            vote_times=vote_times,
+        )
+        dustpan_gained_target = _vote_multi_image_bool(
+            images=[reference_color, color],
+            prompt=dustpan_prompt,
+            vote_times=vote_times,
+        )
+        return floor_has_target, dustpan_gained_target
+
+    current_color = _get_top_color_frame(arx)
+    floor_has_target, dustpan_gained_target = _run_once(current_color)
+    if floor_has_target:
+        return SweepJudgeResult(
+            continue_sweep=True,
+            floor_has_target=True,
+            dustpan_gained_target=dustpan_gained_target,
+            reason="target still on floor",
+        )
+    if dustpan_gained_target:
+        return SweepJudgeResult(
+            continue_sweep=False,
+            floor_has_target=False,
+            dustpan_gained_target=True,
+            reason="target no longer on floor and dustpan gained target",
+        )
+
+    time.sleep(max(0.0, float(verify_retry_s)))
+    retry_color = _get_top_color_frame(arx)
+    floor_has_target_retry, dustpan_gained_target_retry = _run_once(
+        retry_color)
+    if floor_has_target_retry:
+        return SweepJudgeResult(
+            continue_sweep=True,
+            floor_has_target=True,
+            dustpan_gained_target=dustpan_gained_target_retry,
+            reason="retry check still sees target on floor",
+        )
+    if dustpan_gained_target_retry:
+        return SweepJudgeResult(
+            continue_sweep=False,
+            floor_has_target=False,
+            dustpan_gained_target=True,
+            reason="retry check confirms dustpan gained target",
+        )
+    return SweepJudgeResult(
+        continue_sweep=True,
+        floor_has_target=False,
+        dustpan_gained_target=False,
+        reason="result uncertain, continue sweep conservatively",
+    )
 
 
 def pick_tools(arx: ARXRobotEnv) -> None:
@@ -172,6 +335,7 @@ def dual_swap(
     object_prompt: str = "a white crumpled paper on the floor",
     debug_raw: bool = True,
     depth_median_n: int = 10,
+    judge_vote_times: int = 3,
 ) -> Optional[np.ndarray]:
     old_settings = _init_keyboard()
     try:
@@ -189,6 +353,7 @@ def dual_swap(
             return target_base_point
 
         arx.step_smooth_eef(swap_seq[0])
+        reference_color = _get_top_color_frame(arx)
         sweep_actions = swap_seq[1:]
         actions_per_sweep = 4
         max_sweeps = len(sweep_actions) // actions_per_sweep
@@ -199,7 +364,27 @@ def dual_swap(
                 arx.step_smooth_eef(action)
             if sweep_idx == max_sweeps - 1:
                 break
-            if not _confirm_continue_swap(sweep_idx + 1, max_sweeps):
+            try:
+                judge_result = _judge_continue_swap(
+                    arx,
+                    object_prompt=object_prompt,
+                    reference_color=reference_color,
+                    vote_times=judge_vote_times,
+                )
+            except Exception as exc:
+                print(
+                    f"[auto-judge] failed after sweep {sweep_idx + 1}: {exc}. "
+                    "Continue sweep conservatively."
+                )
+                continue
+            print(
+                f"[auto-judge] sweep {sweep_idx + 1}/{max_sweeps}: "
+                f"floor_has_target={judge_result.floor_has_target}, "
+                f"dustpan_gained_target={judge_result.dustpan_gained_target}, "
+                f"continue={judge_result.continue_sweep}, "
+                f"reason={judge_result.reason}"
+            )
+            if not judge_result.continue_sweep:
                 break
         return target_base_point
     finally:
