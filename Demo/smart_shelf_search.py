@@ -9,6 +9,7 @@ import cv2
 from demo_utils import run_push_away, step_base_duration
 from nav_goal import nav_to_goal
 from single_arm_pick_place import single_arm_pick_place
+from move_away import move_away
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
@@ -68,19 +69,38 @@ def smart_shelf_search(
                 "place_arm": None,
             }
         if "blue" in search_prompt.lower():
-            run_push_away(arx)
-            search_prompt = "a blue box"
-        _, _, pick_arm = single_arm_pick_place(
+            result = move_away(
             arx=arx,
-            pick_prompt=search_prompt,
-            place_prompt="",
-            arm_side="fit",
-            item_type="normal object",
-            debug=debug_pick_place,
-            depth_median_n=depth_median_n,
-            verify_completion=True,
-            completion_retry_attempts=0,
-        )
+            pick_prompt="a blue box",
+            debug_raw=True,
+            depth_median_n=5,
+            home_after_move = True,
+            )
+            # run_push_away(arx)
+            search_prompt = "a blue box"
+            _, _, pick_arm = single_arm_pick_place(
+                arx=arx,
+                pick_prompt=search_prompt,
+                place_prompt="",
+                arm_side=result.arm,
+                item_type="normal object",
+                debug=debug_pick_place,
+                depth_median_n=depth_median_n,
+                verify_completion=True,
+                completion_retry_attempts=0,
+            )
+        else:    
+            _, _, pick_arm = single_arm_pick_place(
+                arx=arx,
+                pick_prompt=search_prompt,
+                place_prompt="",
+                arm_side="fit",
+                item_type="normal object",
+                debug=debug_pick_place,
+                depth_median_n=depth_median_n,
+                verify_completion=True,
+                completion_retry_attempts=0,
+            )
         if pick_arm is None:
             return {
                 "success": False,
@@ -124,13 +144,14 @@ def smart_shelf_search(
         #     arx.step_lift(20.0)
         # else:
         #     arx.step_lift(14.0)
-        if "shelf" in place_prompt.lower():
+        if "white" in place_prompt.lower():
             arx.step_lift(0.0)
         else:
             arx.step_lift(14.0)
         resolved_place_prompt = place_prompt
         if "xx" in resolved_place_prompt and pick_arm in {"left", "right"}:
-            resolved_place_prompt = resolved_place_prompt.replace("xx", pick_arm, 1)
+            location = "a little" +pick_arm
+            resolved_place_prompt = resolved_place_prompt.replace("xx", location, 1)
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
@@ -184,12 +205,12 @@ def main() -> None:
         search_prompts = [
             "a blue object behind a rubik's cube",
             "a yellow glue",
-            "a brush",
+            "a tennis ball",
         ]
         place_prompts = [
-            "a blue square plate",
-            "the xx part of the second floor on shelf",
-            "a blue square plate",
+            "the blue plate",
+            "the white plate",
+            "the blue plate",
         ]
 
         for search_prompt, place_prompt in zip(search_prompts, place_prompts):

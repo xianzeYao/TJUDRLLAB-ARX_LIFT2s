@@ -6,7 +6,7 @@ OPEN = -3.3
 GRIPPER_OFFSET = 0.14
 GRIPPER_NORMAL_OBJECT = -0.5
 Z_NORMAL_OBJECT = 0.17
-PITCH_NORMAL_OBJECT = 0.37
+PITCH_NORMAL_OBJECT = 0.36
 CALIBRATE_OFFSET_LEFT = 0.015
 CALIBRATE_OFFSET_RIGHT = 0.01
 
@@ -54,7 +54,7 @@ def make_pick_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str,
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
-            base[2] + 0.055,
+            base[2] + 0.058,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -73,7 +73,7 @@ def make_close_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nd
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
-            base[2] + 0.055,
+            base[2] + 0.058,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -92,7 +92,7 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
         [
             base[0] - GRIPPER_OFFSET - 0.045,
             base[1] + calibrate_offset,
-            base[2] + 0.08,
+            base[2] + 0.07,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -167,7 +167,7 @@ def make_down_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
         [
             base[0] - GRIPPER_OFFSET-0.0015,
             base[1] + calibrate_offset,
-            base[2] + Z_NORMAL_OBJECT - 0.05,
+            base[2] + Z_NORMAL_OBJECT - 0.06,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -186,7 +186,7 @@ def make_open_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
         [
             base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
-            base[2] + Z_NORMAL_OBJECT - 0.05,
+            base[2] + Z_NORMAL_OBJECT - 0.06,
             0,
             PITCH_NORMAL_OBJECT,
             0,

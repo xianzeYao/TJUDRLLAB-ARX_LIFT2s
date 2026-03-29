@@ -23,6 +23,7 @@ from motion_pick_place_straw import (
     build_pick_straw_sequence,
     build_place_straw_sequence,
 )
+from motion_move_away import build_move_away_sequence
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEPLOYMENT_DIR = ROOT_DIR / "Deployment"
@@ -303,3 +304,15 @@ def execute_pick_place_normal_object_sequence(
         place_seq = build_place_normal_object_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step_smooth_eef(act)
+
+
+def execute_move_away(
+    arx,
+    blocker_ref: Optional[np.ndarray],
+    arm: str,
+) -> None:
+    if blocker_ref is None:
+        raise ValueError("blocker_ref 为空")
+    move_away_seq = build_move_away_sequence(blocker_ref, arm=arm)
+    for act in move_away_seq:
+        arx.step_smooth_eef(act)
