@@ -1,11 +1,11 @@
 import numpy as np
 from typing import Dict, Optional
 
-CLOSE = 0.0
-OPEN = -3.3
+CLOSE = -0.5
+OPEN = -1.8
 GRIPPER_OFFSET = 0.15
 GRIPPER_DEEPBOX = -0.5
-Z_DEEPBOX = 0.045
+Z_DEEPBOX = 0.04
 CALIBRATE_OFFSET_LEFT = 0.015
 CALIBRATE_OFFSET_RIGHT = 0.01
 
@@ -31,10 +31,10 @@ def make_pick_move_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
-        [base[0] - GRIPPER_OFFSET - 0.13,
+        [base[0] - GRIPPER_OFFSET - 0.1,
          base[1] + calibrate_offset,
-         base[2] + 0.01,
-         0, 0, 0, OPEN],
+         base[2] + 0.03,
+         0, 0, 0, 0],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)
@@ -47,7 +47,7 @@ def make_pick_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str,
     active = np.array(
         [base[0] - GRIPPER_OFFSET + 0.03,
          base[1] + calibrate_offset,
-         base[2] + 0.01,
+         base[2] + 0.03,
          0, 0, 0, OPEN],
         dtype=np.float32,
     )
@@ -61,7 +61,7 @@ def make_close_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nd
     active = np.array(
         [base[0] - GRIPPER_OFFSET + 0.03,
          base[1] + calibrate_offset,
-         base[2] + 0.01,
+         base[2] + 0.03,
          0, 0, 0, GRIPPER_DEEPBOX],
         dtype=np.float32,
     )
@@ -73,9 +73,9 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
-        [(base[0] - GRIPPER_OFFSET) / 4,
+        [base[0] - GRIPPER_OFFSET-0.05,
          base[1] + calibrate_offset,
-         base[2] + Z_DEEPBOX,
+         base[2] + Z_DEEPBOX+0.04,
          0, 0, 0, GRIPPER_DEEPBOX],
         dtype=np.float32,
     )
@@ -84,11 +84,25 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
 
 def make_pick_back_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.ndarray]:
     """夹住回到初始位置，保持不动。"""
-    base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
-    calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
-        [0, 0, 0,
-         0, 0, 0, GRIPPER_DEEPBOX],
+        [0.04,
+         -0.05 if arm == "left" else 0.05,
+         0.025,
+         0, 0.3, -1.4 if arm == "left" else 1.4,
+         GRIPPER_DEEPBOX],
+        dtype=np.float32,
+    )
+    return _make_arm_action(arm, active)
+
+
+def make_pick_release_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.ndarray]:
+    """抓取后执行释放动作。"""
+    active = np.array(
+        [0.04,
+         -0.05 if arm == "left" else 0.05,
+         0.025,
+         0, 0.3, -1.4 if arm == "left" else 1.4,
+         OPEN],
         dtype=np.float32,
     )
     return _make_arm_action(arm, active)
@@ -178,6 +192,7 @@ def build_pick_deepbox_sequence(pt_ref: Optional[np.ndarray], arm: str):
         make_close_action(pt_ref, arm),
         make_pick_stop_action(pt_ref, arm),
         make_pick_back_action(pt_ref, arm),
+        make_pick_release_action(pt_ref, arm),
     ]
 
 

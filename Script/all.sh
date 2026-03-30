@@ -27,16 +27,19 @@ sleep 1
 gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
   align_depth.enable:=true \
-  pointcloud.enable:=true\
+  pointcloud.enable:=true \
+  enable_sync:=true \
   publish_tf:=true \
   tf_publish_rate:=50.0 \
   camera_name:=camera_h \
   camera_namespace:=camera_h_namespace \
   serial_no:=_409122274317 \
+  rgb_camera.enable_auto_white_balance:=false \
+  rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=12500 \
+  depth_module.exposure:=13000 \
   depth_module.gain:=16;exec bash;"
 
 sleep 1
@@ -44,16 +47,19 @@ sleep 1
 gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
   align_depth.enable:=true \
-  pointcloud.enable:=true\
+  pointcloud.enable:=true \
+  enable_sync:=true \
   publish_tf:=true \
   tf_publish_rate:=50.0 \
   camera_name:=camera_l \
   camera_namespace:=camera_l_namespace \
   serial_no:=_409122272587 \
+  rgb_camera.enable_auto_white_balance:=false \
+  rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=12500 \
+  depth_module.exposure:=13000 \
   depth_module.gain:=16;exec bash;"
 
 sleep 1
@@ -61,14 +67,17 @@ sleep 1
 gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/realsense; \
   source install/setup.bash && ros2 launch realsense2_camera rs_launch.py\
   align_depth.enable:=true \
-  pointcloud.enable:=true\
+  pointcloud.enable:=true \
+  enable_sync:=true \
   publish_tf:=true \
   tf_publish_rate:=50.0 \
   camera_name:=camera_r \
   camera_namespace:=camera_r_namespace \
   serial_no:=_409122272707 \
+  rgb_camera.enable_auto_white_balance:=false \
+  rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=12500 \
+  depth_module.exposure:=13000 \
   depth_module.gain:=16;exec bash;"
