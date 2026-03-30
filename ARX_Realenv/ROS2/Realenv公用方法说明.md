@@ -2,18 +2,19 @@
 
 这里的 `Realenv` 对应当前代码里的 `ARXRobotEnv`，文件位置是 `ARX_Realenv/ROS2/arx_ros2_env.py`。
 
-本文主要说明三件事：
+这份说明按实际公开接口整理，重点回答三件事：
 
-1. 一般程序怎么建立类实例
-2. 推荐的 `try: ... reset ... finally: close()` 写法
-3. `reset` 和 `close` 中间常见可以做什么，以及几个公用方法的用途
+1. 怎么初始化 `ARXRobotEnv`
+2. `reset()` 到 `close()` 之间能做什么
+3. 常用方法的参数、返回值和调用约定
 
-## 1. 一般程序骨架
+## 1. 推荐程序骨架
 
-推荐写法：
+推荐把资源申请和释放写完整，不要只写一半：
 
 ```python
 import sys
+import time
 import numpy as np
 
 sys.path.append("../ARX_Realenv/ROS2")
@@ -32,14 +33,29 @@ def main():
             max_a_rpy=1.00,
             camera_type="all",
             camera_view=("camera_h",),
+            dir=None,
+            video=False,
+            video_fps=20.0,
+            video_name=None,
             img_size=(640, 480),
         )
 
         obs = env.reset()
         print(obs.keys())
-        # obs = env.reset()
 
-        # 这里开始写你的业务逻辑
+        env.step_lift(18.0)
+        env.step_smooth_eef(
+            {
+                "left": np.array(
+                    [0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0],
+                    dtype=np.float32,
+                )
+            }
+        )
+
+        env.step_base(0.2, 0.0, 0.0)
+        time.sleep(1.0)
+        env.step_base(0.0, 0.0, 0.0)
 
     finally:
         if env is not None:
@@ -50,10 +66,47 @@ if __name__ == "__main__":
     main()
 ```
 
+## 2. `ARXRobotEnv(...)` 初始化参数
 
-## 4. `reset()` 和 `close()` 中间可以干嘛
+`ARXRobotEnv` 初始化时会：
 
-中间一般就是做三类事情：
+- 启动 ROS2
+- 创建通信节点
+- 启动相机/状态订阅
+- enable 机器人
+
+当前构造函数参数如下：
+
+- `duration_per_step: float = 0.02`
+  平滑插值控制里单步时长，`1/20` 就是 20Hz。
+- `min_steps: int = 10`
+  平滑轨迹最少插值步数。
+- `max_v_xyz: float = 0.25`
+  平移最大速度限制。
+- `max_v_rpy: float = 0.3`
+  姿态最大速度限制。
+- `max_a_xyz: float = 0.20`
+  平移最大加速度限制。
+- `max_a_rpy: float = 1.00`
+  姿态最大加速度限制。
+- `camera_type: Literal["color", "depth", "all"] = "all"`
+  要订阅的图像类型。
+- `camera_view: Iterable[str] = ("camera_l", "camera_h", "camera_r")`
+  要订阅的相机视角列表。
+- `dir: Optional[str] = None`
+  默认图片/视频保存目录；后续 `get_observation()`、`get_camera()` 传 `save_dir=None` 时会沿用这里。
+- `video: bool = False`
+  默认保存方式；`False` 保存单帧，`True` 保存视频。
+- `video_fps: float = 20.0`
+  保存视频时的帧率。
+- `video_name: Optional[str] = None`
+  保存视频时的视频名前缀。
+- `img_size: Optional[Tuple[int, int]] = (224, 224)`
+  统一缩放后的图像大小，传给相机读取接口。
+
+## 3. `reset()` 到 `close()` 之间通常做什么
+
+中间一般就三类动作：
 
 - 取观测
 - 发控制
@@ -64,22 +117,19 @@ if __name__ == "__main__":
 ```python
 obs = env.reset()
 
-# 1) 看当前状态/图像
+# 1) 取状态 / 图像
 obs = env.get_observation()
-cams = env.get_camera()
+frames = env.get_camera()
 status = env.get_robot_status()
 
-# 2) 控制机械臂
-action = {
-    "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
-}
-env.step_smooth_eef(action)
-
-# 3) 控制升降和底盘
+# 2) 控制机械臂 / 升降 / 底盘
+env.step_smooth_eef(
+    {"left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32)}
+)
 env.step_lift(18.0)
 env.step_base(0.2, 0.0, 0.0)
 
-# 4) 切模式
+# 3) 切模式
 env.set_special_mode(1, side="left")
 ```
 
@@ -88,44 +138,22 @@ env.set_special_mode(1, side="left")
 - 拍图并做检测
 - 读取左右臂状态
 - 控制单臂或双臂末端位姿
-- 直接发关节目标
-- 做增量控制
-- 控制底盘平移/旋转
+- 控制绝对关节目标或关节增量
+- 控制底盘平移 / 旋转
 - 控制升降高度
 - 执行抓取、放置、巡检等任务
 
-## 5. 常用公用方法
+## 4. 观测与状态接口
 
-## `ARXRobotEnv(...)`
-
-创建真实机器人环境对象，初始化时会启动 ROS2 通信并 enable 机器人。
-
-常用参数：
-
-- `duration_per_step`：插值控制里每一步的时间
-- `min_steps`：最少插值步数
-- `max_v_xyz / max_a_xyz`：末端平移速度/加速度限制
-- `max_v_rpy / max_a_rpy`：末端姿态速度/加速度限制
-- `camera_type`：`"color"`、`"depth"`、`"all"`
-- `camera_view`：相机列表，例如 `("camera_h",)` 或 `("camera_l", "camera_h", "camera_r")`
-- `dir`：取图时保存目录，默认 `None`
-- `video`：是否保存视频
-- `video_name`：视频文件名前缀
-- `img_size`：图像缩放大小，例如 `(640, 480)`
-
-## `reset()`
+## `reset() -> Dict[str, np.ndarray]`
 
 作用：
 
-- 等待一小段时间让状态稳定
+- 等待约 `2.5s` 让状态稳定
 - 双臂回初始位
-- 升降归零
+- 升降回到 `0.0`
 - 底盘速度清零
 - 返回一份观测 `obs`
-
-返回值：
-
-- `Dict[str, np.ndarray]`
 
 常见写法：
 
@@ -133,36 +161,38 @@ env.set_special_mode(1, side="left")
 obs = env.reset()
 ```
 
-## `close()`
+适合场景：
 
-作用：
+- 程序起始阶段做一次标准复位
+- 新任务开始前统一回到已知状态
 
-- 停止底盘
-- 双臂回初始位
-- 升降归零
-- 关闭 ROS2 通信资源
-
-一般只在程序退出时调用一次。
-
-## `get_observation(...)`
+## `get_observation(save_dir=None, video=None, include_arm=True, include_camera=True, include_base=True)`
 
 统一获取观测，最常用。
 
 ```python
 obs = env.get_observation()
+obs = env.get_observation(include_camera=False)
+obs = env.get_observation(save_dir="debug_frames", video=False)
 ```
 
-常用参数：
+参数说明：
 
-- `save_dir`：保存图像或视频的目录
-- `video`：`True` 保存视频，`False` 保存单帧
-- `include_arm`：是否包含双臂状态
-- `include_camera`：是否包含图像
-- `include_base`：是否包含底盘/升降状态
+- `save_dir`
+  当前调用的保存目录；`None` 时沿用实例化时的 `dir`。
+- `video`
+  当前调用的保存模式；`None` 时沿用实例化时的 `video`。
+- `include_arm`
+  是否包含左右臂状态。
+- `include_camera`
+  是否包含相机图像。
+- `include_base`
+  是否包含升降 / 底盘状态。
 
 常见返回键：
 
-- `left_end_pos` / `right_end_pos`：`[x, y, z, roll, pitch, yaw]`
+- `left_end_pos` / `right_end_pos`
+  末端位姿，格式为 `[x, y, z, roll, pitch, yaw]`
 - `left_joint_pos` / `right_joint_pos`
 - `left_joint_vel` / `right_joint_vel`
 - `left_joint_cur` / `right_joint_cur`
@@ -173,18 +203,30 @@ obs = env.get_observation()
 
 适合场景：
 
-- 想一次把状态和图像都拿到
-- 想保存当前图像
-- 想在算法里直接读取统一观测
+- 想一次拿齐状态和图像
+- 算法流程里直接读取统一观测
+- 需要顺手保存调试图片 / 视频
 
-## `get_camera(...)`
+## `get_camera(save_dir=None, video=None, target_size=None, return_status=False)`
 
 只取相机，或者取相机加状态快照。
 
 ```python
 frames = env.get_camera()
+frames = env.get_camera(target_size=(640, 480))
 frames, status = env.get_camera(return_status=True)
 ```
+
+参数说明：
+
+- `save_dir`
+  本次保存目录，`None` 时沿用实例化参数。
+- `video`
+  本次是否保存视频，`None` 时沿用实例化参数。
+- `target_size`
+  本次图像缩放大小，`None` 时沿用实例化时的 `img_size`。
+- `return_status`
+  `False` 时只返回 `frames`；`True` 时返回 `(frames, status)`。
 
 返回的 `frames` 是字典，键通常像：
 
@@ -216,81 +258,125 @@ base = status["base"]
 - `left.joint_vel`
 - `left.joint_cur`
 - `base.height`
+- `base.chx / base.chy / base.chz`
 
 适合场景：
 
 - 判断当前机械臂或底盘状态
 - 不想取图，只想轻量读取状态
 
-## `step_smooth_eef(action)`
+## 5. 控制接口
 
-最常用的末端控制接口。
+### 5.1 机械臂动作的统一格式
 
-这里的 `action` 实际上传的是字典，不是单个数组。每个机械臂目标是 7 维：
+机械臂控制接口里，`action` 统一都是字典：
+
+```python
+{
+    "left": np.ndarray(shape=(7,), dtype=np.float32),
+    "right": np.ndarray(shape=(7,), dtype=np.float32),
+}
+```
+
+可以只传单臂，例如只传 `"left"`。
+
+末端位姿类接口的 7 维含义：
 
 - 前 6 维：`[x, y, z, roll, pitch, yaw]`
 - 第 7 维：`gripper`
 
-示例：
+关节类接口的 7 维含义：
+
+- 前 6 维：关节位置
+- 第 7 维：`gripper`
+
+如果维度不对、字典为空、或者键不是 `left/right`，接口会直接报错。
+
+### 5.2 `step_smooth_eef(action, return_observation=False)`
+
+最常用的末端控制接口，会根据当前状态做插值。
 
 ```python
-action = {
-    "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
-    "right": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
-}
-env.step_smooth_eef(action)
+env.step_smooth_eef(
+    {
+        "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
+        "right": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.0], dtype=np.float32),
+    }
+)
 ```
 
-特点：
+说明：
 
-- 会参考当前观测做插值规划
-- 会受 `duration_per_step`、`min_steps`、速度加速度限制影响
-- 适合正常的末端位姿控制
+- 会读取当前观测后做轨迹插值
+- 受 `duration_per_step`、`min_steps`、速度 / 加速度限制影响
+- `return_observation=True` 时，执行完会再取一次观测返回
 
-## `step_raw_eef(action)`
+适合场景：
 
-直接发送绝对末端目标，不走上层插值规划。
+- 常规末端位姿控制
+- 需要更平滑的动作执行
 
-格式仍然是：
+### 5.3 `step_raw_eef(action, return_observation=False)`
 
-- `left/right -> [x, y, z, roll, pitch, yaw, gripper]`
-
-示例：
+直接发送绝对末端目标，不做上层插值规划。
 
 ```python
-env.step_raw_eef({
-    "left": np.array([0.12, 0.00, 0.18, 0.0, 0.0, 0.0, -2.5], dtype=np.float32)
-})
+env.step_raw_eef(
+    {
+        "left": np.array([0.12, 0.00, 0.18, 0.0, 0.0, 0.0, -2.5], dtype=np.float32)
+    }
+)
 ```
 
 适合场景：
 
 - 你已经自己规划好了目标
-- 你想更直接地下发末端命令
+- 想更直接地下发末端命令
 
-## `step_raw_joint(action)`
+### 5.4 `step_raw_joint(action, return_observation=False)`
 
 直接发送绝对关节目标。
 
-每个目标也是 7 维：
-
-- 前 6 维：关节位置
-- 第 7 维：夹爪
-
-示例：
-
 ```python
-env.step_raw_joint({
-    "right": np.array([0.0, 0.3, 0.8, 1.2, 0.0, 0.0, -2.0], dtype=np.float32)
-})
+env.step_raw_joint(
+    {
+        "right": np.array([0.0, 0.3, 0.8, 1.2, 0.0, 0.0, -2.0], dtype=np.float32)
+    }
+)
 ```
 
 适合场景：
 
-- 你明确知道关节目标
-- 你要做 joint 级调试
+- 明确知道关节目标
+- 做 joint 级调试
 
-## `step_delta_eef(action)`
+### 5.5 `step_smooth_joint(action, num_steps=5, step_sleep_s=0.01, return_observation=False)`
+
+对绝对关节目标做线性插值后逐步发送。
+
+```python
+env.step_smooth_joint(
+    {
+        "left": np.array([0.0, 0.2, 0.6, 1.0, 0.0, 0.0, -2.0], dtype=np.float32)
+    },
+    num_steps=8,
+    step_sleep_s=0.02,
+)
+```
+
+参数说明：
+
+- `num_steps`
+  插值步数，必须大于 `0`。
+- `step_sleep_s`
+  两步之间的 sleep 时间，必须大于等于 `0`。
+
+适合场景：
+
+- 想用 joint 目标，但又不希望一步跳过去
+- 机械臂调试时需要更可控的关节过渡
+
+### 5.6 `step_delta_eef(action, return_observation=False)`
 
 在当前末端位姿基础上做增量控制。
 
@@ -298,12 +384,12 @@ env.step_raw_joint({
 
 - `left/right -> [dx, dy, dz, droll, dpitch, dyaw, dgripper]`
 
-示例：
-
 ```python
-env.step_delta_eef({
-    "left": np.array([0.01, 0.00, 0.00, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-})
+env.step_delta_eef(
+    {
+        "left": np.array([0.01, 0.00, 0.00, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    }
+)
 ```
 
 适合场景：
@@ -312,7 +398,7 @@ env.step_delta_eef({
 - 视觉伺服
 - 手工调位置
 
-## `step_delta_joint(action)`
+### 5.7 `step_delta_joint(action, return_observation=False)`
 
 在当前关节位置基础上做关节增量控制。
 
@@ -320,20 +406,25 @@ env.step_delta_eef({
 
 - `left/right -> [dj0, dj1, dj2, dj3, dj4, dj5, dgripper]`
 
-## `step_lift(height)`
+适合场景：
 
-控制升降高度。
+- 关节级微调
+- 标定 / 调试
+
+### 5.8 `step_lift(height, return_observation=False)`
+
+控制升降高度，内部会从当前高度逐步走到目标高度。
 
 ```python
 env.step_lift(18.0)
 ```
 
-说明：
+适合场景：
 
-- 内部会从当前高度逐步走到目标高度
-- 常用于抓取前调工作高度
+- 抓取前调工作高度
+- 巡检 / 放置时切不同作业面
 
-## `step_base(vx, vy, vz)`
+### 5.9 `step_base(vx, vy, vz, return_observation=False)`
 
 发送一次底盘速度命令，立即返回。
 
@@ -341,7 +432,7 @@ env.step_lift(18.0)
 env.step_base(0.2, 0.0, 0.0)
 ```
 
-当前常见理解方式：
+当前项目里的常见理解方式：
 
 - `vx`：前后
 - `vy`：左右
@@ -350,7 +441,7 @@ env.step_base(0.2, 0.0, 0.0)
 注意：
 
 - 这是一次发送，不会自动持续
-- 想持续运动时，通常需要配合 `time.sleep(...)`
+- 想持续运动时，通常要配合 `time.sleep(...)`
 - 结束时记得再发一次 `env.step_base(0.0, 0.0, 0.0)`
 
 典型写法：
@@ -361,7 +452,7 @@ time.sleep(2.0)
 env.step_base(0.0, 0.0, 0.0)
 ```
 
-## `set_special_mode(mode, side="both")`
+### 5.10 `set_special_mode(mode, side="both")`
 
 给机械臂切特殊模式。
 
@@ -383,71 +474,31 @@ env.set_special_mode(2, side="both")
 说明：
 
 - `side` 可选 `left`、`right`、`both`
-- `mode=1` 本质上会走回初始位逻辑
+- `mode=1` 不是单独发模式切换，而是直接走回初始位逻辑
+- 返回值是 `(success, error_message)`
 
-## 6. 一个更完整的推荐模板
+## 6. 关闭接口
 
-```python
-import sys
-import time
-import numpy as np
+## `close()`
 
-sys.path.append("../ARX_Realenv/ROS2")
-from arx_ros2_env import ARXRobotEnv
+作用：
 
+- 底盘速度清零
+- 双臂回初始位
+- 升降归零
+- 关闭 ROS2 通信资源
 
-def main():
-    env = None
-    try:
-        env = ARXRobotEnv(
-            duration_per_step=1.0 / 20.0,
-            min_steps=20,
-            max_v_xyz=0.25,
-            max_a_xyz=0.20,
-            max_v_rpy=0.30,
-            max_a_rpy=1.00,
-            camera_type="all",
-            camera_view=("camera_h",),
-            img_size=(640, 480),
-        )
-
-        env.reset()
-        env.step_lift(18.0)
-
-        obs = env.get_observation()
-        print(obs.keys())
-
-        frames = env.get_camera()
-        print(frames.keys())
-
-        action = {
-            "left": np.array([0.10, 0.00, 0.15, 0.0, 0.0, 0.0, -2.2], dtype=np.float32),
-        }
-        env.step_smooth_eef(action)
-
-        env.step_base(0.2, 0.0, 0.0)
-        time.sleep(1.0)
-        env.step_base(0.0, 0.0, 0.0)
-
-        env.set_special_mode(1, side="left")
-
-    finally:
-        if env is not None:
-            env.close()
-
-
-if __name__ == "__main__":
-    main()
-```
+一般只在程序退出时调用一次，推荐放进 `finally`。
 
 ## 7. 使用建议
 
 - 普通业务优先用 `env.get_observation()`、`env.get_camera()`、`env.get_robot_status()`，不要一开始就直接操作 `env.node`
-- 常规末端控制优先用 `env.step_smooth_eef(...)`
-- 需要 joint 级调试时再用 `step_raw_joint(...)`
+- 常规末端控制优先用 `step_smooth_eef(...)`
+- 需要 joint 级调试时再用 `step_raw_joint(...)` 或 `step_smooth_joint(...)`
 - 需要微调时优先用 `step_delta_eef(...)` 或 `step_delta_joint(...)`
-- 任何程序都建议把 `close()` 放在 `finally` 里
 - 做底盘持续移动时，最后一定补一个零速度停止命令
+- 机械臂动作接口的 `action` 一定传字典，不是单个数组
+- 程序结束时一定调用 `close()`
 
 ## 8. 一句话总结
 

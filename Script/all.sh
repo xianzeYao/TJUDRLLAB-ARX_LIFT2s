@@ -39,7 +39,7 @@ gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=13000 \
+  depth_module.exposure:=12750 \
   depth_module.gain:=16;exec bash;"
 
 sleep 1
@@ -59,7 +59,7 @@ gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=13000 \
+  depth_module.exposure:=12750 \
   depth_module.gain:=16;exec bash;"
 
 sleep 1
@@ -79,5 +79,5 @@ gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   depth_module.color_profile:=640x480x60 \
   depth_module.depth_profile:=640x480x60 \
   depth_module.enable_auto_exposure:=false \
-  depth_module.exposure:=13000 \
+  depth_module.exposure:=12750 \
   depth_module.gain:=16;exec bash;"
