@@ -1,6 +1,7 @@
 from __future__ import annotations
 from demo_utils import step_base_duration
 
+import heapq
 import re
 import sys
 import time
@@ -23,8 +24,10 @@ if TYPE_CHECKING:
 
 ColorName = Literal["green", "yellow", "blue"]
 PositionName = Literal["start", "green", "yellow", "blue"]
+PromptStep = Tuple[ColorName, int]
 
 COLOR_ORDER: tuple[ColorName, ...] = ("green", "yellow", "blue")
+ALL_POSITIONS: tuple[PositionName, ...] = ("start", "green", "yellow", "blue")
 COLOR_TO_LIFT_HEIGHT: Dict[ColorName, float] = {
     "green": 18.0,
     "yellow": 0.0,
@@ -38,17 +41,12 @@ BETWEEN_MOVE_DURATION = 0.7
 SETTLE_S = 0.5
 PICK_ARM_SIDE = "fit"
 
-MOTION_BY_TRANSITION: Dict[Tuple[PositionName, PositionName], Tuple[float, float, float, float]] = {
+BASE_MOTION_BY_TRANSITION: Dict[Tuple[PositionName, PositionName], Tuple[float, float, float, float]] = {
     ("start", "green"): (MOVE_VX, -MOVE_VY, 0.0, START_MOVE_DURATION),
     ("start", "yellow"): (MOVE_VX, 0.0, 0.0, START_MOVE_DURATION),
     ("start", "blue"): (MOVE_VX, MOVE_VY, 0.0, START_MOVE_DURATION),
     ("yellow", "green"): (MOVE_VX, -MOVE_VY, 0.0, BETWEEN_MOVE_DURATION),
-    ("green", "yellow"): (-MOVE_VX, MOVE_VY, 0.0, BETWEEN_MOVE_DURATION),
     ("yellow", "blue"): (MOVE_VX, MOVE_VY, 0.0, BETWEEN_MOVE_DURATION),
-    ("blue", "yellow"): (-MOVE_VX, -MOVE_VY, 0.0, BETWEEN_MOVE_DURATION),
-    ("green", "start"): (-MOVE_VX, MOVE_VY, 0.0, START_MOVE_DURATION),
-    ("yellow", "start"): (-MOVE_VX, 0.0, 0.0, START_MOVE_DURATION),
-    ("blue", "start"): (-MOVE_VX, -MOVE_VY, 0.0, START_MOVE_DURATION),
 }
 
 PROMPT_ITEM_PATTERN = re.compile(
@@ -68,7 +66,7 @@ def _normalize_prompt(prompt: str) -> str:
     return normalized
 
 
-def parse_color_counts(prompt: str) -> Dict[ColorName, int]:
+def parse_prompt_steps(prompt: str) -> List[PromptStep]:
     normalized = _normalize_prompt(prompt)
     if not normalized:
         raise ValueError("prompt is empty")
@@ -85,10 +83,12 @@ def parse_color_counts(prompt: str) -> Dict[ColorName, int]:
         raise ValueError(f"prompt contains unsupported text: {remainder!r}")
 
     counts: Dict[ColorName, int] = {color: 0 for color in COLOR_ORDER}
+    steps: List[PromptStep] = []
     for match in matches:
         count = int(match.group(1))
         color = match.group(2).lower()
         counts[color] += count
+        steps.append((color, count))
 
     for color, count in counts.items():
         if count > 6:
@@ -96,40 +96,89 @@ def parse_color_counts(prompt: str) -> Dict[ColorName, int]:
                 f"color {color!r} total count must be <= 6, got {count}"
             )
 
-    if not any(counts.values()):
+    if not steps:
         raise ValueError("no valid color target found in prompt")
-    return counts
+    return steps
 
 
-def _format_plan(counts: Dict[ColorName, int]) -> str:
-    parts = [
-        f"{color} x{counts[color]}"
-        for color in COLOR_ORDER
-        if counts[color] > 0
-    ]
-    return ", ".join(parts)
+def _format_plan(steps: List[PromptStep]) -> str:
+    return ", ".join(f"{color} x{count}" for color, count in steps)
+
+
+def _reverse_motion(
+    motion: Tuple[float, float, float, float],
+) -> Tuple[float, float, float, float]:
+    vx, vy, vz, duration = motion
+    return (-vx, -vy, -vz, duration)
+
+
+def _get_direct_motion(
+    src: PositionName,
+    dst: PositionName,
+) -> Tuple[float, float, float, float] | None:
+    motion = BASE_MOTION_BY_TRANSITION.get((src, dst))
+    if motion is not None:
+        return motion
+    reverse_motion = BASE_MOTION_BY_TRANSITION.get((dst, src))
+    if reverse_motion is not None:
+        return _reverse_motion(reverse_motion)
+    return None
 
 
 def _plan_transition(
     current_position: PositionName,
     target_position: PositionName,
-) -> List[Tuple[float, float, float, float]]:
+) -> List[Tuple[PositionName, PositionName, Tuple[float, float, float, float]]]:
     if current_position == target_position:
         return []
 
-    direct = MOTION_BY_TRANSITION.get((current_position, target_position))
-    if direct is not None:
-        return [direct]
+    dist: Dict[PositionName, float] = {current_position: 0.0}
+    prev: Dict[PositionName, PositionName] = {}
+    heap: List[Tuple[float, PositionName]] = [(0.0, current_position)]
 
-    if current_position == "green" and target_position == "blue":
-        return [
-            MOTION_BY_TRANSITION[("green", "yellow")],
-            MOTION_BY_TRANSITION[("yellow", "blue")],
-        ]
+    while heap:
+        cost, node = heapq.heappop(heap)
+        if cost > dist.get(node, float("inf")):
+            continue
+        if node == target_position:
+            break
+        for neighbor in ALL_POSITIONS:
+            if neighbor == node:
+                continue
+            motion = _get_direct_motion(node, neighbor)
+            if motion is None:
+                continue
+            next_cost = cost + float(motion[3])
+            if next_cost >= dist.get(neighbor, float("inf")):
+                continue
+            dist[neighbor] = next_cost
+            prev[neighbor] = node
+            heapq.heappush(heap, (next_cost, neighbor))
 
-    raise ValueError(
-        f"unsupported transition: {current_position!r} -> {target_position!r}"
-    )
+    if target_position not in dist:
+        raise ValueError(
+            f"unsupported transition: {current_position!r} -> {target_position!r}"
+        )
+
+    path: List[PositionName] = [target_position]
+    while path[-1] != current_position:
+        parent = prev.get(path[-1])
+        if parent is None:
+            raise ValueError(
+                f"failed to build transition path: {current_position!r} -> {target_position!r}"
+            )
+        path.append(parent)
+    path.reverse()
+
+    motions: List[Tuple[PositionName, PositionName, Tuple[float, float, float, float]]] = []
+    for src, dst in zip(path[:-1], path[1:]):
+        motion = _get_direct_motion(src, dst)
+        if motion is None:
+            raise ValueError(
+                f"missing direct motion for path segment: {src!r} -> {dst!r}"
+            )
+        motions.append((src, dst, motion))
+    return motions
 
 
 def move_to_position(
@@ -143,10 +192,10 @@ def move_to_position(
     motions = _plan_transition(current_position, target_position)
     if not motions:
         print(f"[pick_multi_box] already at {target_position}, no base move")
-    for vx, vy, vz, duration in motions:
+    for src, dst, (vx, vy, vz, duration) in motions:
         print(
             "[pick_multi_box] "
-            f"move {current_position} -> {target_position}, "
+            f"move {src} -> {dst}, "
             f"vx={vx:.2f}, vy={vy:.2f}, vz={vz:.2f}, duration={duration:.1f}s"
         )
         step_base_duration(arx, vx=vx, vy=vy, vz=vz, duration=duration)
@@ -210,24 +259,22 @@ def multi_box(
     depth_median_n: int = 10,
     start_position: PositionName = "start",
 ) -> None:
-    counts = parse_color_counts(prompt)
+    steps = parse_prompt_steps(prompt)
     current_position: PositionName = start_position
+    start_height = COLOR_TO_LIFT_HEIGHT.get(start_position, START_LIFT_HEIGHT)
     print(
         "[pick_multi_box] "
-        f"plan: {_format_plan(counts)}"
+        f"plan: {_format_plan(steps)}"
     )
     print(
         "[pick_multi_box] "
-        f"start at {current_position}, lift={START_LIFT_HEIGHT:.1f}, "
+        f"start at {current_position}, lift={start_height:.1f}, "
         "green=left, yellow=center, blue=right, start=in front of yellow"
     )
-    arx.step_lift(START_LIFT_HEIGHT)
+    arx.step_lift(start_height)
 
     stop_requested = False
-    for color in COLOR_ORDER:
-        count = counts[color]
-        if count <= 0:
-            continue
+    for color, count in steps:
         print(f"[pick_multi_box] target {color}, count={count}")
         current_position = move_to_position(
             arx,
@@ -251,7 +298,7 @@ def multi_box(
         current_position=current_position,
         target_position=start_position,
         settle_s=SETTLE_S,
-        apply_lift=False,
+        apply_lift=(start_position in COLOR_TO_LIFT_HEIGHT),
     )
     if stop_requested:
         print("[pick_multi_box] stopped early after user canceled one pick")
@@ -273,8 +320,8 @@ def main() -> None:
     )
     try:
         arx.reset()
-        # Example prompt: "1 blue 2 yellow"
-        # the order is not important
+        # Example prompt: "1 blue 2 yellow 1 green"
+        # execution follows the prompt order
         multi_box(
             arx,
             prompt="2 blue 5 yellow 1 green",

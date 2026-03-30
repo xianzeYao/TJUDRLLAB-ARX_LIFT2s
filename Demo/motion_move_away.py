@@ -1,3 +1,5 @@
+"""拨开遮挡物的简化动作模板。"""
+
 import numpy as np
 from typing import Dict, Optional
 
@@ -9,6 +11,7 @@ PUSH_DISTANCE_Y = 0.05
 
 
 def _make_arm_action(arm: str, active: np.ndarray) -> Dict[str, np.ndarray]:
+    """把单臂动作包装成环境接口要求的字典。"""
     if arm == "left":
         return {"left": active}
     if arm == "right":
@@ -17,6 +20,7 @@ def _make_arm_action(arm: str, active: np.ndarray) -> Dict[str, np.ndarray]:
 
 
 def _get_calibrate_offset(arm: str) -> float:
+    """返回左右臂各自的 Y 方向补偿。"""
     if arm == "left":
         return CALIBRATE_OFFSET_LEFT
     if arm == "right":
@@ -25,6 +29,7 @@ def _get_calibrate_offset(arm: str) -> float:
 
 
 def _get_push_sign(arm: str) -> float:
+    """根据左右臂确定推开的方向符号。"""
     if arm == "left":
         return 1.0
     if arm == "right":
@@ -36,6 +41,7 @@ def make_move_away_approach_action(
     pt_ref: Optional[np.ndarray],
     arm: str,
 ) -> Dict[str, np.ndarray]:
+    """生成接近障碍物、准备推开的动作。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
     push_sign = _get_push_sign(arm)
@@ -59,6 +65,7 @@ def make_move_away_push_action(
     pt_ref: Optional[np.ndarray],
     arm: str,
 ) -> Dict[str, np.ndarray]:
+    """生成侧向推开障碍物的动作。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
     push_sign = _get_push_sign(arm)
@@ -82,6 +89,7 @@ def build_move_away_sequence(
     pt_ref: Optional[np.ndarray],
     arm: str,
 ):
+    """返回“接近 + 推开”两步组成的动作序列。"""
     return [
         make_move_away_approach_action(pt_ref, arm),
         make_move_away_push_action(pt_ref, arm),

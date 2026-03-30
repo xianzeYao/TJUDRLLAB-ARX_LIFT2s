@@ -84,6 +84,7 @@ def get_aligned_frames(
     arx,
     depth_median_n: int = 1,
 ) -> Tuple[np.ndarray | None, np.ndarray | None]:
+    """读取 `camera_h` 的彩色图和对齐深度图，可选做多帧深度中值融合。"""
     frames = arx.get_camera(target_size=(640, 480), return_status=False)
     color = frames.get("camera_h_color")
     depth = frames.get("camera_h_aligned_depth_to_color")
@@ -111,6 +112,7 @@ def _pixel_to_camera_point(
     depth_image: np.ndarray,
     K: np.ndarray,
 ) -> np.ndarray:
+    """把像素坐标和深度值投影到相机坐标系齐次点。"""
     u, v = int(round(pixel[0])), int(round(pixel[1]))
     H, W = depth_image.shape
     if not (0 <= u < W and 0 <= v < H):
@@ -126,6 +128,7 @@ def _pixel_to_camera_point(
 def _normalize_center_offset(
     offset: np.ndarray | Tuple[float, ...] | List[float] | None,
 ) -> np.ndarray:
+    """把 center 模式下的 offset 统一整理成 4 维齐次偏移。"""
     if offset is None:
         return BIAS_REF2CAM.astype(np.float64, copy=True)
 
@@ -146,7 +149,7 @@ def pixel_to_ref_point(
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray:
-    """像素 + 深度 -> ref 坐标系 3D 点。"""
+    """像素 + 深度 -> 左/右参考坐标系 3D 点。"""
     if K is None:
         K = load_intrinsics()
     cam_point = _pixel_to_camera_point(pixel, depth_image, K)
@@ -169,7 +172,7 @@ def pixel_to_ref_point_safe(
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray | None:
-    """像素 + 深度 -> ref 3D 点。深度无效则返回 None。"""
+    """`pixel_to_ref_point()` 的安全版本，失败时返回 `None`。"""
     try:
         return pixel_to_ref_point(
             pixel,
@@ -192,7 +195,7 @@ def pixel_to_base_point(
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray:
-    """像素 + 深度 -> 机器人工作坐标系 3D 点。offset 即 center 使用的 BIAS_REF2CAM。"""
+    """像素 + 深度 -> 机器人工作坐标系 3D 点。"""
     if K is None:
         K = load_intrinsics()
     cam_point = _pixel_to_camera_point(pixel, depth_image, K)
@@ -222,7 +225,7 @@ def pixel_to_base_point_safe(
     T_left: np.ndarray | None = None,
     T_right: np.ndarray | None = None,
 ) -> np.ndarray | None:
-    """像素 + 深度 -> base 3D 点。offset 即 center 使用的 BIAS_REF2CAM。"""
+    """`pixel_to_base_point()` 的安全版本，失败时返回 `None`。"""
     try:
         return pixel_to_base_point(
             pixel,

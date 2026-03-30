@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Demo 里的通用文本解析、底盘控制和动作序列执行辅助函数。"""
+
 import re
 import sys
 import time
@@ -102,6 +104,7 @@ def do_replan(
     planning_prompt: str,
     max_retries: int = 5,
 ) -> Tuple[List[str], List[str], Optional[str]]:
+    """重复调用规划模型，直到解析出有效步骤列表。"""
     last_text: Optional[str] = None
     for _ in range(max_retries):
         raw_result = predict_multi_points_from_rgb(
@@ -135,6 +138,7 @@ def draw_text_lines(
     scale: float = 0.5,
     thickness: int = 2,
 ) -> None:
+    """按固定行高在图像上绘制多行文字。"""
     x, y = origin
     for i, line in enumerate(lines):
         cv2.putText(
@@ -154,6 +158,7 @@ def draw_point_label(
     pos: tuple[int, int],
     color: tuple[int, int, int] = (255, 255, 255),
 ) -> None:
+    """在指定像素点附近绘制一个简短标签。"""
     draw_text_lines(
         img,
         [label],
@@ -172,6 +177,7 @@ def step_base_duration(
     vz: float,
     duration: float,
 ) -> None:
+    """让底盘按给定速度运动一段时间，并在结束后主动发送零速度。"""
     if duration <= 0:
         print("base move duration must be positive")
         return
@@ -181,6 +187,7 @@ def step_base_duration(
 
 
 def run_push_away(arx) -> None:
+    """调用 ACT 模型执行 push-away，再把右臂回到 home。"""
     from testACT_parallel import run_act
 
     run_act(
@@ -210,6 +217,7 @@ def estimate_lift_from_goal_z(
     min_lift: float = 0.0,
     max_lift: float = 20.0,
 ) -> float:
+    """根据目标点高度估算新的升降目标，并限制在有效范围内。"""
     if abs(meters_per_lift_unit) < 1e-8:
         raise ValueError("meters_per_lift_unit must be non-zero")
     target_lift = float(current_lift) + (
@@ -226,6 +234,7 @@ def execute_pick_place_cup_sequence(
     do_pick: bool = True,
     do_place: bool = True,
 ) -> None:
+    """执行杯子的抓取/放置动作序列。"""
     if do_pick:
         if pick_ref is None:
             raise ValueError("pick_ref 为空")
@@ -248,6 +257,7 @@ def execute_pick_place_straw_sequence(
     do_pick: bool = True,
     do_place: bool = True,
 ) -> None:
+    """执行吸管的抓取/放置动作序列。"""
     if do_pick:
         if pick_ref is None:
             raise ValueError("pick_ref 为空")
@@ -270,6 +280,7 @@ def execute_pick_place_deepbox_sequence(
     do_pick: bool = True,
     do_place: bool = True,
 ) -> None:
+    """执行深盒类目标的抓取/放置动作序列。"""
     if do_pick:
         if pick_ref is None:
             raise ValueError("pick_ref 为空")
@@ -292,6 +303,7 @@ def execute_pick_place_normal_object_sequence(
     do_pick: bool = True,
     do_place: bool = True,
 ) -> None:
+    """执行普通物体的抓取/放置动作序列。"""
     if do_pick:
         if pick_ref is None:
             raise ValueError("pick_ref 为空")
@@ -311,6 +323,7 @@ def execute_move_away(
     blocker_ref: Optional[np.ndarray],
     arm: str,
 ) -> None:
+    """执行拨开障碍物的动作序列。"""
     if blocker_ref is None:
         raise ValueError("blocker_ref 为空")
     move_away_seq = build_move_away_sequence(blocker_ref, arm=arm)

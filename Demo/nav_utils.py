@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""底盘路径点到旋转/前进动作的简单转换和执行工具。"""
+
 import math
 from typing import List, Tuple
 
@@ -18,6 +20,7 @@ def path_to_actions(
     path: List[Tuple[float, float]],
     init_yaw: float = 0.0,
 ) -> List[Action]:
+    """把二维路径点转换为依次执行的 rotate/forward 动作列表。"""
     actions: List[Action] = []
     cur_yaw = init_yaw
 
@@ -53,6 +56,7 @@ def execute_nav_actions(
     actions: List[Action],
     distance: float,
 ) -> List[ExecutedRotation]:
+    """执行底盘动作列表，并记录实际做过的旋转动作用于回退。"""
     executed_rotations: List[ExecutedRotation] = []
     for action, value in actions:
         if action == "rotate":
@@ -89,6 +93,7 @@ def recover_rotations(
     arx,
     executed_rotations: List[ExecutedRotation],
 ) -> None:
+    """按逆序撤销之前记录下来的旋转动作。"""
     for vz, duration in reversed(executed_rotations):
         step_base_duration(
             arx,
