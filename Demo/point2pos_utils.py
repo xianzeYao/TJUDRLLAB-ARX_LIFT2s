@@ -96,7 +96,14 @@ def get_aligned_frames(
         depth_i = frames.get("camera_h_aligned_depth_to_color")
         if depth_i is not None:
             depths.append(depth_i)
-    return color, np.median(np.stack(depths, axis=0), axis=0)
+
+    depth_stack = np.stack(depths, axis=0).astype(np.float32, copy=False)
+    valid_mask = np.isfinite(depth_stack) & (depth_stack > 0)
+    valid_count = np.count_nonzero(valid_mask, axis=0)
+    masked_depth = np.where(valid_mask, depth_stack, np.nan)
+    median_depth = np.nanmedian(masked_depth, axis=0)
+    median_depth = np.where(valid_count > 0, median_depth, 0.0)
+    return color, median_depth
 
 
 def _pixel_to_camera_point(

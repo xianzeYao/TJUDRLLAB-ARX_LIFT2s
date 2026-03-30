@@ -54,7 +54,7 @@ def make_pick_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str,
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
-            base[2] + 0.058,
+            base[2] + 0.06,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -73,7 +73,7 @@ def make_close_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nd
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
-            base[2] + 0.058,
+            base[2] + 0.06,
             0,
             PITCH_NORMAL_OBJECT,
             0,

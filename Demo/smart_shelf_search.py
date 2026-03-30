@@ -68,16 +68,16 @@ def smart_shelf_search(
                 "pick_arm": None,
                 "place_arm": None,
             }
-        if "blue" in search_prompt.lower():
+        if "pink" in search_prompt.lower():
             result = move_away(
-            arx=arx,
-            pick_prompt="a blue box",
-            debug_raw=True,
-            depth_median_n=5,
-            home_after_move = True,
+                arx=arx,
+                pick_prompt="a pink box",
+                debug_raw=True,
+                depth_median_n=5,
+                home_after_move=True,
             )
             # run_push_away(arx)
-            search_prompt = "a blue box"
+            search_prompt = "a pink box"
             _, _, pick_arm = single_arm_pick_place(
                 arx=arx,
                 pick_prompt=search_prompt,
@@ -89,7 +89,7 @@ def smart_shelf_search(
                 verify_completion=True,
                 completion_retry_attempts=0,
             )
-        else:    
+        else:
             _, _, pick_arm = single_arm_pick_place(
                 arx=arx,
                 pick_prompt=search_prompt,
@@ -150,8 +150,9 @@ def smart_shelf_search(
             arx.step_lift(14.0)
         resolved_place_prompt = place_prompt
         if "xx" in resolved_place_prompt and pick_arm in {"left", "right"}:
-            location = "a little" +pick_arm
-            resolved_place_prompt = resolved_place_prompt.replace("xx", location, 1)
+            location = "a little" + pick_arm
+            resolved_place_prompt = resolved_place_prompt.replace(
+                "xx", location, 1)
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
@@ -193,9 +194,9 @@ def main() -> None:
         duration_per_step=1.0 / 20.0,
         min_steps=20,
         max_v_xyz=0.15,
-        max_a_xyz=0.20,
-        max_v_rpy=0.45,
-        max_a_rpy=1.00,
+        max_a_xyz=0.1,
+        max_v_rpy=0.5,
+        max_a_rpy=0.6,
         camera_type="all",
         camera_view=("camera_l", "camera_h", "camera_r"),
         img_size=(640, 480),
@@ -203,8 +204,8 @@ def main() -> None:
     try:
         arx.reset()
         search_prompts = [
-            "a blue object behind a rubik's cube",
-            "a yellow glue",
+            "a pink object behind a rubik's cube",
+            "a white glue"
             "a tennis ball",
         ]
         place_prompts = [
@@ -221,7 +222,7 @@ def main() -> None:
                 nav_table_prompt="a brown coaster on the floor",
                 place_prompt=place_prompt,
                 rotate_recover=True,
-                nav_debug=False,
+                nav_debug=True,
                 debug_pick_place=True,
                 depth_median_n=10,
             )
