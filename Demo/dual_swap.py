@@ -336,6 +336,7 @@ def dual_swap(
     debug_raw: bool = True,
     depth_median_n: int = 10,
     judge_vote_times: int = 3,
+    required_consecutive_dustpan_gain: int = 3,
 ) -> Optional[np.ndarray]:
     old_settings = _init_keyboard()
     try:
@@ -357,6 +358,7 @@ def dual_swap(
         sweep_actions = swap_seq[1:]
         actions_per_sweep = 4
         max_sweeps = len(sweep_actions) // actions_per_sweep
+        consecutive_dustpan_gain_count = 0
         for sweep_idx in range(max_sweeps):
             start = sweep_idx * actions_per_sweep
             end = start + actions_per_sweep
@@ -372,6 +374,7 @@ def dual_swap(
                     vote_times=judge_vote_times,
                 )
             except Exception as exc:
+                consecutive_dustpan_gain_count = 0
                 print(
                     f"[auto-judge] failed after sweep {sweep_idx + 1}: {exc}. "
                     "Continue sweep conservatively."
@@ -384,8 +387,24 @@ def dual_swap(
                 f"continue={judge_result.continue_sweep}, "
                 f"reason={judge_result.reason}"
             )
+            if judge_result.dustpan_gained_target:
+                consecutive_dustpan_gain_count += 1
+            else:
+                consecutive_dustpan_gain_count = 0
             if not judge_result.continue_sweep:
+                print("[auto-judge] original stop condition met, retract sweep.")
                 break
+            if consecutive_dustpan_gain_count >= required_consecutive_dustpan_gain:
+                print(
+                    "[auto-judge] dustpan gained target in consecutive checks, "
+                    "retract sweep."
+                )
+                break
+            if judge_result.dustpan_gained_target:
+                print(
+                    "[auto-judge] dustpan gained target once, "
+                    "wait for one more confirmation before retracting."
+                )
         return target_base_point
     finally:
         cv2.destroyAllWindows()

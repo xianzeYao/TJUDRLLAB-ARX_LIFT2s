@@ -47,7 +47,7 @@ def make_move_away_approach_action(
     push_sign = _get_push_sign(arm)
     active = np.array(
         [
-            base[0] - GRIPPER_OFFSET+0.055,
+            base[0] - GRIPPER_OFFSET+0.0525,
             base[1] + calibrate_offset+push_sign*PUSH_DISTANCE_Y,
             base[2] + APPROACH_Z_OFFSET,
             0,
@@ -71,7 +71,7 @@ def make_move_away_push_action(
     push_sign = _get_push_sign(arm)
     active = np.array(
         [
-            base[0] - GRIPPER_OFFSET + 0.055,
+            base[0] - GRIPPER_OFFSET + 0.0525,
             base[1] + calibrate_offset + push_sign *
             PUSH_DISTANCE_Y-push_sign * PUSH_DISTANCE_Y*2.5,
             base[2] + APPROACH_Z_OFFSET,

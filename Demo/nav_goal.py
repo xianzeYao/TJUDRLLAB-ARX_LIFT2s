@@ -74,14 +74,20 @@ def _vote_goal_presence(
     return true_count > false_count
 
 
-def _build_rotate_search_roi_polygon(
+SEARCH_ROI_TOP_Y_RATIO = 1.0 / 3.0
+SEARCH_ROI_TOP_WIDTH_RATIO = 1.0 / 2.0
+
+
+def _build_search_roi_polygon(
     image_shape: tuple[int, ...],
 ) -> np.ndarray:
     height, width = image_shape[:2]
-    top_y = int(round(height / 3.0))
+    top_y = int(round(height * SEARCH_ROI_TOP_Y_RATIO))
     bottom_y = height - 1
-    top_left_x = int(round(width / 3.0))
-    top_right_x = int(round(width * 2.0 / 3.0))
+    top_width = width * SEARCH_ROI_TOP_WIDTH_RATIO
+    top_margin = (width - top_width) / 2.0
+    top_left_x = int(round(top_margin))
+    top_right_x = int(round(width - 1 - top_margin))
     bottom_left_x = 0
     bottom_right_x = width - 1
     return np.array(
@@ -130,7 +136,7 @@ def _select_goal_point(
     for point in points:
         if not _point_in_roi(point, roi_polygon):
             u, v = int(round(point[0])), int(round(point[1]))
-            print(f"预测像素 {(u, v)} 不在 rotate_search ROI 内，自动刷新")
+            print(f"预测像素 {(u, v)} 不在 search ROI 内，自动刷新")
             continue
         goal_pw = pixel_to_base_point_safe(
             point, depth, robot_part="center", offset=[0.0, offset, 0.0])
@@ -192,6 +198,8 @@ def _confirm_debug_view(
             continue
 
         cv2.destroyWindow(win)
+        if cv_key == ord("q"):
+            return None
         if cv_key == ord("r"):
             return False
         return True
@@ -211,6 +219,7 @@ def nav_to_goal(
     depth_median_n: int = 5,
     vote_times: int = 5,
     rotate_search_on_miss: bool = False,
+    use_initial_search_roi: bool = False,
 ):
     old_settings = _init_keyboard()
     last_result = None
@@ -232,6 +241,10 @@ def nav_to_goal(
         arx.step_base(0.0, 0.0, 0.0)
         rotating_search = False
 
+    def _check_nav_emergency_stop() -> bool:
+        key = _get_key_nonblock()
+        return key == "n"
+
     try:
         arx.step_lift(lift_height)
         while True:
@@ -239,6 +252,11 @@ def nav_to_goal(
             if key == "q":
                 _stop_rotate_search()
                 print("Stop signal received.")
+                return last_result
+            if key == "n":
+                _stop_rotate_search()
+                arx.step_base(0.0, 0.0, 0.0)
+                print("Emergency stop received.")
                 return last_result
 
             frames = arx.get_camera(target_size=(
@@ -250,14 +268,15 @@ def nav_to_goal(
                     continue
                 raise RuntimeError("failed to read camera_h color frame")
 
-            rotate_search_roi_polygon = (
-                _build_rotate_search_roi_polygon(color.shape)
-                if rotating_search
+            search_roi_polygon = _build_search_roi_polygon(color.shape)
+            presence_roi_polygon = (
+                search_roi_polygon
+                if rotating_search or use_initial_search_roi
                 else None
             )
             presence_color = (
-                _apply_roi_focus(color, rotate_search_roi_polygon)
-                if rotate_search_roi_polygon is not None
+                _apply_roi_focus(color, presence_roi_polygon)
+                if presence_roi_polygon is not None
                 else color
             )
             detect_goal = _vote_goal_presence(
@@ -284,7 +303,7 @@ def nav_to_goal(
                     continue
             else:
                 consecutive_true_count = 0
-            goal_point_roi_polygon = rotate_search_roi_polygon
+            goal_point_roi_polygon = presence_roi_polygon
             _stop_rotate_search()
             consecutive_true_count = 0
 
@@ -365,11 +384,16 @@ def nav_to_goal(
                     f"target_lift={estimated_lift:.3f}"
                 )
                 arx.step_lift(estimated_lift)
-            executed_rotations = execute_nav_actions(
+            executed_rotations, interrupted = execute_nav_actions(
                 arx,
                 actions,
                 distance=distance,
+                stop_checker=_check_nav_emergency_stop,
             )
+            if interrupted:
+                _stop_rotate_search()
+                print("Emergency stop received.")
+                return last_result
             if rotate_recover:
                 recover_rotations(arx, executed_rotations)
             last_result = (goal_pw, actions)

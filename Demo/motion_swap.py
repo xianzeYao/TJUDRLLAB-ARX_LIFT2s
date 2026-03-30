@@ -26,7 +26,7 @@ def make_swap_left_action(pt_ref: Optional[np.ndarray],) -> Dict[str, np.ndarray
         dtype=np.float32),
         "right":  np.array(
         [base[0]-GRIPPER_OFFSET+0.05, base[1] +
-            DUSTPAN_OFFSET+0.42, 0.01, 0.25, 0, 0, 0.0],
+            DUSTPAN_OFFSET+0.42, 0.01, 0.23, 0, 0, 0.0],
         dtype=np.float32)}
     return action
 

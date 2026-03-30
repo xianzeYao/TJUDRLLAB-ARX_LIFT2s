@@ -67,11 +67,13 @@ def nav_dual_sweep(
                 goal=goal,
                 distance=distance,
                 lift_height=nav_lift_height,
+                offset = 0.48,
                 continuous=False,
                 debug_raw=nav_debug_raw,
                 depth_median_n=nav_depth_median_n,
                 vote_times=vote_times,
                 rotate_search_on_miss=True,
+                use_initial_search_roi=True,
             )
             if nav_result is None:
                 print("nav_to_goal failed, retry next cycle")
@@ -114,12 +116,12 @@ def main():
         arx.reset()
         nav_dual_sweep(
             arx,
-            goal="nearest paper cup or nearest paper ball or nearest bottle on the floor",
-            distance=0.5,
+            goal="paper cup or paper ball or bottle on the floor",
+            distance=0.51,
             nav_lift_height=0.0,
             nav_debug_raw=True,
             swap_debug_raw=True,
-            nav_depth_median_n=2,
+            nav_depth_median_n=5,
             swap_depth_median_n=5,
             vote_times=3,
         )

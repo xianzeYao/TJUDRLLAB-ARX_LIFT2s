@@ -108,7 +108,7 @@ def make_pick_back_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     active = np.array(
         [
-            (base[0] - GRIPPER_OFFSET-0.045) / 4,
+            (base[0] - GRIPPER_OFFSET-0.08) / 5,
             0,
             (base[2] + 0.05) / 2 + 0.065,
             0,

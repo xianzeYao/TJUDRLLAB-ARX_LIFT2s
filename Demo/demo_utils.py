@@ -6,7 +6,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -176,14 +176,31 @@ def step_base_duration(
     vy: float,
     vz: float,
     duration: float,
-) -> None:
-    """让底盘按给定速度运动一段时间，并在结束后主动发送零速度。"""
+    should_stop: Optional[Callable[[], bool]] = None,
+    poll_interval_s: float = 0.05,
+) -> bool:
+    """让底盘按给定速度运动一段时间，可选在运动中轮询中断条件。"""
     if duration <= 0:
         print("base move duration must be positive")
-        return
+        return True
     arx.step_base(vx, vy, vz)
-    time.sleep(duration)
-    arx.step_base(0.0, 0.0, 0.0)
+    completed = True
+    try:
+        if should_stop is None:
+            time.sleep(duration)
+        else:
+            end_time = time.monotonic() + duration
+            while True:
+                remaining = end_time - time.monotonic()
+                if remaining <= 0:
+                    break
+                if should_stop():
+                    completed = False
+                    break
+                time.sleep(min(max(0.0, float(poll_interval_s)), remaining))
+    finally:
+        arx.step_base(0.0, 0.0, 0.0)
+    return completed
 
 
 def run_push_away(arx) -> None:

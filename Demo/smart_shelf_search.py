@@ -44,7 +44,7 @@ def smart_shelf_search(
 
     try:
         if "behind" in search_prompt.lower():
-            distance = 0.4
+            distance = 0.425
         else:
             distance = 0.45
         first_nav_result = nav_to_goal(
@@ -53,11 +53,12 @@ def smart_shelf_search(
             distance=distance,
             lift_height=first_nav_height,
             rotate_recover=rotate_recover,
-            offset=0.36,
+            offset=0.23,
             use_goal_z_for_lift=True,
             continuous=False,
             debug_raw=nav_debug,
             depth_median_n=depth_median_n,
+            use_initial_search_roi=False,
         )
         if first_nav_result is None:
             return {
@@ -68,16 +69,16 @@ def smart_shelf_search(
                 "pick_arm": None,
                 "place_arm": None,
             }
-        if "pink" in search_prompt.lower():
+        if "blue" in search_prompt.lower():
             result = move_away(
                 arx=arx,
-                pick_prompt="a pink box",
+                pick_prompt="a blue box",
                 debug_raw=True,
                 depth_median_n=5,
                 home_after_move=True,
             )
             # run_push_away(arx)
-            search_prompt = "a pink box"
+            search_prompt = "center of a blue box"
             _, _, pick_arm = single_arm_pick_place(
                 arx=arx,
                 pick_prompt=search_prompt,
@@ -125,6 +126,7 @@ def smart_shelf_search(
             continuous=False,
             debug_raw=nav_debug,
             depth_median_n=depth_median_n,
+            use_initial_search_roi=False,
         )
         if second_nav_result is None:
             return {
@@ -147,10 +149,10 @@ def smart_shelf_search(
         if "white" in place_prompt.lower():
             arx.step_lift(0.0)
         else:
-            arx.step_lift(14.0)
+            arx.step_lift(14.5)
         resolved_place_prompt = place_prompt
         if "xx" in resolved_place_prompt and pick_arm in {"left", "right"}:
-            location = "a little" + pick_arm
+            location = pick_arm
             resolved_place_prompt = resolved_place_prompt.replace(
                 "xx", location, 1)
         _, _, place_arm = single_arm_pick_place(
@@ -204,20 +206,20 @@ def main() -> None:
     try:
         arx.reset()
         search_prompts = [
-            "a pink object behind a rubik's cube",
-            "a white glue"
+            "a blue object behind a rubik's cube",
             "a tennis ball",
+            "a yellow screwdriver",
         ]
         place_prompts = [
-            "the blue plate",
-            "the white plate",
-            "the blue plate",
+            "the xx center part of the blue plate",
+            "the xx center part of the white plate",
+            "the xx center part of the blue plate",
         ]
 
         for search_prompt, place_prompt in zip(search_prompts, place_prompts):
             result = smart_shelf_search(
                 arx=arx,
-                first_nav_height=14.0,
+                first_nav_height=14.5,
                 search_prompt=search_prompt,
                 nav_table_prompt="a brown coaster on the floor",
                 place_prompt=place_prompt,

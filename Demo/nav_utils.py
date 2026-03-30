@@ -3,7 +3,7 @@ from __future__ import annotations
 """底盘路径点到旋转/前进动作的简单转换和执行工具。"""
 
 import math
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from demo_utils import step_base_duration
 
@@ -55,9 +55,11 @@ def execute_nav_actions(
     arx,
     actions: List[Action],
     distance: float,
-) -> List[ExecutedRotation]:
+    stop_checker: Optional[Callable[[], bool]] = None,
+) -> Tuple[List[ExecutedRotation], bool]:
     """执行底盘动作列表，并记录实际做过的旋转动作用于回退。"""
     executed_rotations: List[ExecutedRotation] = []
+    interrupted = False
     for action, value in actions:
         if action == "rotate":
             if value <= 0:
@@ -67,26 +69,34 @@ def execute_nav_actions(
                 duration = value / BASE_ROTATE_SPEED
                 vz = ROTATE_VZ_CMD
 
-            step_base_duration(
+            completed = step_base_duration(
                 arx,
                 vx=0.0,
                 vy=0.0,
                 vz=float(vz),
                 duration=float(duration),
+                should_stop=stop_checker,
             )
+            if not completed:
+                interrupted = True
+                break
             executed_rotations.append((float(vz), float(duration)))
         elif action == "forward":
             remaining = value - distance
             if remaining <= 0:
                 continue
-            step_base_duration(
+            completed = step_base_duration(
                 arx,
                 vx=FORWARD_VX_CMD,
                 vy=0.0,
                 vz=0.0,
                 duration=float(remaining / BASE_FORWARD_SPEED),
+                should_stop=stop_checker,
             )
-    return executed_rotations
+            if not completed:
+                interrupted = True
+                break
+    return executed_rotations, interrupted
 
 
 def recover_rotations(
