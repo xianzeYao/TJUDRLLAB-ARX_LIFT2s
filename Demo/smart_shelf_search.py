@@ -211,9 +211,9 @@ def main() -> None:
             "a yellow screwdriver",
         ]
         place_prompts = [
-            "the xx center part of the blue plate",
-            "the xx center part of the white plate",
-            "the xx center part of the blue plate",
+            "the center part of the blue plate",
+            "the center part of the white plate",
+            "the center part of the blue plate",
         ]
 
         for search_prompt, place_prompt in zip(search_prompts, place_prompts):
@@ -224,8 +224,8 @@ def main() -> None:
                 nav_table_prompt="a brown coaster on the floor",
                 place_prompt=place_prompt,
                 rotate_recover=True,
-                nav_debug=True,
-                debug_pick_place=True,
+                nav_debug=False,
+                debug_pick_place=False,
                 depth_median_n=10,
             )
             print(f"{search_prompt}: {result}")

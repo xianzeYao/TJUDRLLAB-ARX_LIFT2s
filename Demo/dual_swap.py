@@ -336,7 +336,7 @@ def dual_swap(
     debug_raw: bool = True,
     depth_median_n: int = 10,
     judge_vote_times: int = 3,
-    required_consecutive_dustpan_gain: int = 3,
+    required_consecutive_dustpan_gain: int = 2,
 ) -> Optional[np.ndarray]:
     old_settings = _init_keyboard()
     try:
