@@ -77,17 +77,17 @@ if __name__ == "__main__":
 
 当前构造函数参数如下：
 
-- `duration_per_step: float = 0.02`
-  平滑插值控制里单步时长，`1/20` 就是 20Hz。
-- `min_steps: int = 10`
-  平滑轨迹最少插值步数。
+- `duration_per_step: float = 1/20`
+  平滑插值控制里单步时长，默认按 20Hz 发平滑控制。
+- `min_steps: int = 20`
+  平滑轨迹最少插值步数。默认比旧版更保守，小动作不会走得太急。
 - `max_v_xyz: float = 0.25`
   平移最大速度限制。
 - `max_v_rpy: float = 0.3`
   姿态最大速度限制。
-- `max_a_xyz: float = 0.20`
+- `max_a_xyz: float = 0.30`
   平移最大加速度限制。
-- `max_a_rpy: float = 1.00`
+- `max_a_rpy: float = 0.80`
   姿态最大加速度限制。
 - `camera_type: Literal["color", "depth", "all"] = "all"`
   要订阅的图像类型。
@@ -309,6 +309,7 @@ env.step_smooth_eef(
 
 - 会读取当前观测后做轨迹插值
 - 受 `duration_per_step`、`min_steps`、速度 / 加速度限制影响
+- 当动作很小时，`min_steps` 会把整段轨迹真正摊平到更多控制步里，而不是前几步到终点、后面重复发终点
 - `return_observation=True` 时，执行完会再取一次观测返回
 
 适合场景：

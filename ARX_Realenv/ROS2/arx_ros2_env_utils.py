@@ -681,9 +681,11 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
         # 平移和旋转谁更慢，就由谁决定整段动作需要多少控制周期。
         steps_xyz = int(np.ceil(t_xyz / dt)) if t_xyz > 0 else 0
         steps_rpy = int(np.ceil(t_rpy / dt)) if t_rpy > 0 else 0
+        if steps_xyz > 0 and min_steps_i > 0:
+            steps_xyz = max(steps_xyz, min_steps_i)
+        if steps_rpy > 0 and min_steps_i > 0:
+            steps_rpy = max(steps_rpy, min_steps_i)
         pose_steps = max(steps_xyz, steps_rpy)
-        if pose_steps > 0 and min_steps_i > 0:
-            pose_steps = max(pose_steps, min_steps_i)
 
         if d_g > eps_grip:
             if pose_steps > 0:
@@ -702,14 +704,19 @@ def plan_action_sequences(curr_obs: Dict[str, np.ndarray],
 
         seq: list[np.ndarray] = []
         for i in range(max_steps):
-            t = (i + 1) * dt
             # 分别把当前时刻换算成平移和旋转的插值进度。
             if d_xyz > eps_xyz:
-                s_xyz = _trapezoid_fraction(t, d_xyz, v_xyz, a_xyz)
+                progress_xyz = min((i + 1) / float(steps_xyz), 1.0)
+                t_xyz_sample = progress_xyz * t_xyz
+                s_xyz = _trapezoid_fraction(
+                    t_xyz_sample, d_xyz, v_xyz, a_xyz)
             else:
                 s_xyz = 1.0
             if d_rpy > eps_rpy:
-                s_rpy = _trapezoid_fraction(t, d_rpy, v_rpy, a_rpy)
+                progress_rpy = min((i + 1) / float(steps_rpy), 1.0)
+                t_rpy_sample = progress_rpy * t_rpy
+                s_rpy = _trapezoid_fraction(
+                    t_rpy_sample, d_rpy, v_rpy, a_rpy)
             else:
                 s_rpy = 1.0
 

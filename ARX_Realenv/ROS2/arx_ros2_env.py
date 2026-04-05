@@ -6,6 +6,7 @@ from pathlib import Path
 import shlex
 import rclpy
 from arx_ros2_env_utils import *
+from arx_ros2_env_utils import _quat_from_rpy, _quat_multiply, _rpy_from_quat
 
 
 from arx5_arm_msg.msg._robot_cmd import RobotCmd
@@ -17,9 +18,9 @@ class ARXRobotEnv():
     Concrete implementation of BasetEnv for ARX robot.
     """
 
-    def __init__(self, duration_per_step: float = 0.02, min_steps: int = 10,
+    def __init__(self, duration_per_step: float = 1/20, min_steps: int = 20,
                  max_v_xyz: float = 0.25, max_v_rpy: float = 0.3,
-                 max_a_xyz: float = 0.20, max_a_rpy: float = 1.00,
+                 max_a_xyz: float = 0.3, max_a_rpy: float = 0.8,
                  camera_type: Literal["color", "depth", "all"] = "all", camera_view: Iterable[str] = ("camera_l", "camera_h", "camera_r"),
                  dir: Optional[str] = None, video: bool = False, video_fps: float = 20.0,
                  video_name: Optional[str] = None,
@@ -416,7 +417,7 @@ class ARXRobotEnv():
         Returns:
             observation (Dict[str, np.ndarray]): The initial state of the robot.
         """
-        time.sleep(2.5)
+        time.sleep(2.0)
         success, error_message = self._go_to_initial_pose()
         if not success:
             raise RuntimeError(
