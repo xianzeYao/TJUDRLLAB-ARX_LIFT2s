@@ -1,34 +1,22 @@
 from nav_goal import nav_to_goal
 from dual_swap import dual_swap, pick_tools, release_tools
-import select
 import sys
-import termios
 from typing import Optional
 import numpy as np
+from visualize_utils import (
+    VisualizeContext,
+    emit_log,
+    emit_result,
+    emit_stage,
+    get_key_nonblock,
+    init_keyboard,
+    restore_keyboard,
+    should_stop,
+)
 
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
 from arx_ros2_env import ARXRobotEnv  # noqa
-
-
-def _get_key_nonblock():
-    dr, _, _ = select.select([sys.stdin], [], [], 0)
-    if dr:
-        return sys.stdin.read(1)
-    return None
-
-
-def _init_keyboard():
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    new_settings = termios.tcgetattr(fd)
-    new_settings[3] = new_settings[3] & ~termios.ICANON & ~termios.ECHO
-    termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
-    return old_settings
-
-
-def _restore_keyboard(old_settings):
-    termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
 
 def nav_dual_sweep(
@@ -41,63 +29,133 @@ def nav_dual_sweep(
     nav_depth_median_n: int = 5,
     swap_depth_median_n: int = 10,
     vote_times: int = 5,
+    visualize: Optional[VisualizeContext] = None,
 ) -> None:
-    old_settings = _init_keyboard()
+    old_settings = init_keyboard()
+    cycle_idx = 0
+
+    def _should_stop() -> bool:
+        if should_stop(visualize):
+            return True
+        return get_key_nonblock() == "q"
 
     try:
-        pick_tools(arx)
+        emit_stage(
+            visualize,
+            source="nav_dual_sweep",
+            stage="start",
+            message=f"Start nav dual sweep for {goal}",
+            goal=goal,
+        )
+        pick_tools(arx, visualize=visualize)
 
         while True:
-            key = _get_key_nonblock()
-            if key == "q":
+            cycle_idx += 1
+            emit_stage(
+                visualize,
+                source="nav_dual_sweep",
+                stage="cycle",
+                message=f"Start sweep cycle {cycle_idx}",
+                cycle_index=cycle_idx,
+            )
+            if _should_stop():
                 print("Stop signal received.")
+                emit_result(
+                    visualize,
+                    source="nav_dual_sweep",
+                    status="stopped",
+                    message="nav dual sweep stopped",
+                    cycle_index=cycle_idx,
+                )
                 return
 
-            key = _get_key_nonblock()
-            if key == "q":
+            if _should_stop():
                 print("Stop signal received.")
+                emit_result(
+                    visualize,
+                    source="nav_dual_sweep",
+                    status="stopped",
+                    message="nav dual sweep stopped",
+                    cycle_index=cycle_idx,
+                )
                 return
             lift_action = {
                 "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
                 "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
             }
             arx.step_smooth_eef(lift_action)
+            emit_stage(
+                visualize,
+                source="nav_dual_sweep",
+                stage="nav",
+                message=f"Cycle {cycle_idx}: navigate to target",
+                cycle_index=cycle_idx,
+            )
             nav_result = nav_to_goal(
                 arx,
                 goal=goal,
                 distance=distance,
                 lift_height=nav_lift_height,
-                offset = 0.48,
+                offset=0.48,
                 continuous=False,
                 debug_raw=nav_debug_raw,
                 depth_median_n=nav_depth_median_n,
                 vote_times=vote_times,
                 rotate_search_on_miss=True,
                 use_initial_search_roi=True,
+                visualize=visualize,
             )
             if nav_result is None:
                 print("nav_to_goal failed, retry next cycle")
+                emit_log(
+                    visualize,
+                    source="nav_dual_sweep",
+                    stage="nav",
+                    message="nav_to_goal failed, retry next cycle",
+                    cycle_index=cycle_idx,
+                )
                 continue
 
-            key = _get_key_nonblock()
-            if key == "q":
+            if _should_stop():
                 print("Stop signal received.")
+                emit_result(
+                    visualize,
+                    source="nav_dual_sweep",
+                    status="stopped",
+                    message="nav dual sweep stopped",
+                    cycle_index=cycle_idx,
+                )
                 return
             arx.step_lift(0.0)
+            emit_stage(
+                visualize,
+                source="nav_dual_sweep",
+                stage="swap",
+                message=f"Cycle {cycle_idx}: execute dual sweep",
+                cycle_index=cycle_idx,
+            )
             swap_result: Optional[object] = dual_swap(
                 arx,
                 object_prompt=goal,
                 debug_raw=swap_debug_raw,
                 depth_median_n=swap_depth_median_n,
+                visualize=visualize,
             )
 
             if swap_result is None:
                 print("dual_swap failed, retry next cycle")
+                emit_log(
+                    visualize,
+                    source="nav_dual_sweep",
+                    stage="swap",
+                    message="dual_swap failed, retry next cycle",
+                    cycle_index=cycle_idx,
+                )
                 continue
     finally:
         arx.step_lift(0.0)
-        release_tools(arx)
-        _restore_keyboard(old_settings)
+        release_tools(arx, visualize=visualize)
+        restore_keyboard(old_settings)
 
 
 def main():

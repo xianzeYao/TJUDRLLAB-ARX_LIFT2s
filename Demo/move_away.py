@@ -24,6 +24,14 @@ from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb  
 from arx_ros2_env import ARXRobotEnv  # noqa: E402
 from demo_utils import execute_move_away  # noqa: E402
 from point2pos_utils import get_aligned_frames, pixel_to_ref_point_safe  # noqa: E402
+from visualize_utils import (  # noqa: E402
+    VisualizeContext,
+    dispatch_debug_image,
+    emit_event,
+    emit_log,
+    render_move_away_debug_view,
+    should_stop,
+)
 
 DEFAULT_DETECT_RETRIES = 3
 
@@ -152,26 +160,6 @@ def _build_front_blocking_prompt(pick_prompt: str) -> str:
     )
 
 
-def _draw_text_lines(
-    image: np.ndarray,
-    lines: list[str],
-    origin: tuple[int, int] = (10, 25),
-    line_height: int = 22,
-    color: tuple[int, int, int] = (0, 0, 255),
-) -> None:
-    x, y = origin
-    for idx, line in enumerate(lines):
-        cv2.putText(
-            image,
-            line,
-            (x, y + idx * line_height),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-        )
-
-
 def _capture_color_depth(
     arx: ARXRobotEnv,
     depth_median_n: int,
@@ -229,34 +217,6 @@ def _select_arm_from_pixel(
     return "left" if pixel[0] < (image_width / 2.0) else "right"
 
 
-def _confirm_detection(
-    color: np.ndarray,
-    pixel: tuple[int, int],
-    check_result: FrontBlockCheckResult,
-    arm: Literal["left", "right"],
-) -> Literal["accept", "retry", "abort"]:
-    vis = color.copy()
-    cv2.circle(vis, pixel, 4, (0, 0, 255), -1)
-    _draw_text_lines(
-        vis,
-        [
-            f"blocked={check_result.blocked}",
-            f"description={check_result.description or 'unknown'}",
-            f"arm={arm}",
-        ],
-    )
-    win = "move_away_detect"
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    cv2.imshow(win, vis)
-    key = cv2.waitKey(0)
-    cv2.destroyWindow(win)
-    if key == ord("r"):
-        return "retry"
-    if key == ord("q"):
-        return "abort"
-    return "accept"
-
-
 def create_arx_env() -> ARXRobotEnv:
     return ARXRobotEnv(
         duration_per_step=1.0 / 20.0,
@@ -278,12 +238,20 @@ def move_away(
     debug_raw: bool = True,
     depth_median_n: int = 5,
     home_after_move: bool = True,
+    visualize: Optional[VisualizeContext] = None,
 ) -> MoveAwayRunResult:
     if not pick_prompt:
         raise ValueError("pick_prompt must be non-empty")
 
     try:
         for _ in range(DEFAULT_DETECT_RETRIES):
+            if should_stop(visualize):
+                return MoveAwayRunResult(
+                    blocked=False,
+                    description="",
+                    moved_away=False,
+                    message="stopped",
+                )
             color, depth = _capture_color_depth(
                 arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
@@ -297,6 +265,15 @@ def move_away(
                 "[move_away] "
                 f"blocked={check_result.blocked}, "
                 f"description={check_result.description!r}"
+            )
+            emit_log(
+                visualize,
+                source="move_away",
+                stage="detect",
+                message=(
+                    f"blocked={check_result.blocked}, "
+                    f"description={check_result.description!r}"
+                ),
             )
             if not check_result.blocked:
                 return MoveAwayRunResult(
@@ -313,6 +290,12 @@ def move_away(
                 )
             except Exception as exc:
                 print(f"[move_away] blocker point prediction failed: {exc}")
+                emit_log(
+                    visualize,
+                    source="move_away",
+                    stage="detect",
+                    message=f"blocker point prediction failed: {exc}",
+                )
                 continue
 
             arm = _select_arm_from_pixel(blocker_pixel, color.shape[1])
@@ -326,18 +309,47 @@ def move_away(
                     "[move_away] invalid depth for blocker pixel "
                     f"{blocker_pixel}, retry"
                 )
+                emit_log(
+                    visualize,
+                    source="move_away",
+                    stage="detect",
+                    message=(
+                        "invalid depth for blocker pixel "
+                        f"{blocker_pixel}, retry"
+                    ),
+                )
                 continue
 
+            emit_event(
+                visualize,
+                "move_away_plan",
+                source="move_away",
+                blocked=check_result.blocked,
+                description=check_result.description,
+                arm=arm,
+                blocker_pixel=blocker_pixel,
+                blocker_ref_point=np.asarray(
+                    blocker_ref_point, dtype=np.float32).tolist(),
+            )
             if debug_raw:
-                decision = _confirm_detection(
+                debug_image = render_move_away_debug_view(
                     color,
-                    blocker_pixel,
-                    check_result,
-                    arm,
+                    pixel=blocker_pixel,
+                    blocked=check_result.blocked,
+                    description=check_result.description,
+                    arm=arm,
                 )
-                if decision == "retry":
-                    continue
-                if decision == "abort":
+                debug_result = dispatch_debug_image(
+                    visualize,
+                    source="move_away",
+                    panel="manip",
+                    image=debug_image,
+                    window_name="move_away_detect",
+                    blocked=check_result.blocked,
+                    description=check_result.description,
+                    arm=arm,
+                )
+                if debug_result is None:
                     return MoveAwayRunResult(
                         blocked=check_result.blocked,
                         description=check_result.description,
@@ -346,6 +358,8 @@ def move_away(
                         blocker_ref_point=blocker_ref_point,
                         message="user aborted",
                     )
+                if not debug_result:
+                    continue
 
             execute_move_away(arx, blocker_ref_point, arm)
             message = "move away executed"

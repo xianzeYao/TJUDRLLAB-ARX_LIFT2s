@@ -469,7 +469,8 @@ def nav_to_goal_plus(
                 forward_stage_idx,
                 len(PLUS_FORWARD_STAGE_RATIOS) - 1,
             )
-            is_final_stage = current_stage_idx >= len(PLUS_FORWARD_STAGE_RATIOS) - 1
+            is_final_stage = current_stage_idx >= len(
+                PLUS_FORWARD_STAGE_RATIOS) - 1
 
             if abs(yaw_err) > 1e-3:
                 rotate_speed = _estimate_rotate_speed(
@@ -502,7 +503,8 @@ def nav_to_goal_plus(
                     return last_result
                 if is_final_stage and last_motion_end_at is not None:
                     require_post_motion_capture_after = last_motion_end_at
-                    _set_state("waiting for post-rotate goal result before final stage")
+                    _set_state(
+                        "waiting for post-rotate goal result before final stage")
                     continue
 
             forward_speed = _estimate_forward_speed(float(PLUS_FORWARD_VX_CMD))

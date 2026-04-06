@@ -135,7 +135,8 @@ def execute_nav_actions(
                 duration = value / BASE_ROTATE_SPEED
                 vz = ROTATE_VZ_CMD
 
-            completed = _run_action(vx=0.0, vz=float(vz), duration=float(duration))
+            completed = _run_action(
+                vx=0.0, vz=float(vz), duration=float(duration))
             if not completed:
                 interrupted = True
                 break
