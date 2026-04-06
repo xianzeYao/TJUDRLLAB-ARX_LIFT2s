@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import sys
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -25,6 +26,33 @@ from arx_ros2_env import ARXRobotEnv  # noqa: E402
 from nav_dual_sweep import nav_dual_sweep  # noqa: E402
 from smart_shelf_search import smart_shelf_search_from_request  # noqa: E402
 from visualize_utils import VisualizeContext  # noqa: E402
+
+# Median depth sample count for nav target estimation in nav dual sweep.
+DEFAULT_NAV_DEPTH_MEDIAN_N = 5
+# Median depth sample count for swap target estimation in nav dual sweep.
+DEFAULT_SWAP_DEPTH_MEDIAN_N = 5
+# Vote count for goal-presence checking before nav accepts a target.
+DEFAULT_NAV_VOTE_TIMES = 3
+# Whether nav dual sweep keeps the original local navigation debug flow enabled.
+DEFAULT_NAV_LOCAL_DEBUG = True
+# Whether nav dual sweep keeps the original local swap debug flow enabled.
+DEFAULT_SWAP_LOCAL_DEBUG = True
+
+# Whether smart shelf search allows navigation rotate-recover behavior.
+DEFAULT_SHELF_ROTATE_RECOVER = True
+# Median depth sample count for smart shelf search nav/pick/place perception.
+DEFAULT_SHELF_DEPTH_MEDIAN_N = 10
+# Whether smart shelf search keeps the original local navigation debug flow enabled.
+DEFAULT_SHELF_NAV_DEBUG = True
+# Whether smart shelf search keeps the original local pick/place debug flow enabled.
+DEFAULT_SHELF_PICK_DEBUG = True
+
+# Camera polling interval for refreshing the three live camera feeds.
+CAMERA_POLL_INTERVAL_S = 0.08
+# Sleep interval while waiting for the ARX environment before camera polling starts.
+CAMERA_IDLE_SLEEP_S = 0.10
+# Gradio UI timer interval for pulling the latest controller state.
+UI_REFRESH_INTERVAL_S = 0.12
 
 
 def _serialize_json(value: Any) -> Any:
@@ -60,12 +88,20 @@ def _timestamp() -> str:
     return time.strftime("%H:%M:%S")
 
 
+def _to_display_image(image: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if image is None:
+        return None
+    if not isinstance(image, np.ndarray):
+        return image
+    if image.ndim == 3 and image.shape[2] == 3:
+        return np.ascontiguousarray(image[..., ::-1])
+    return image
+
+
 @dataclass
 class RuntimeSnapshot:
     frames: dict[str, np.ndarray] = field(default_factory=dict)
     status: dict[str, Any] = field(default_factory=dict)
-    nav_debug_image: Optional[np.ndarray] = None
-    manip_debug_image: Optional[np.ndarray] = None
     logs: list[str] = field(default_factory=list)
     active_task: str = "idle"
     task_state: str = "idle"
@@ -82,10 +118,33 @@ class DemoController:
         self._state = RuntimeSnapshot()
         self._env: Optional[ARXRobotEnv] = None
         self._camera_thread: Optional[threading.Thread] = None
-        self._task_thread: Optional[threading.Thread] = None
         self._shutdown = threading.Event()
         self._stop_task = threading.Event()
         self._camera_error_logged = False
+        self._task_running = False
+        self._task_queue: queue.Queue[Optional[Callable[[], None]]] = queue.Queue()
+        self._task_worker_thread = threading.Thread(
+            target=self._task_worker_loop,
+            name="gradio-task-worker",
+            daemon=True,
+        )
+        self._task_worker_thread.start()
+
+    def _task_worker_loop(self) -> None:
+        while not self._shutdown.is_set():
+            try:
+                task = self._task_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if task is None:
+                self._task_queue.task_done()
+                break
+            try:
+                task()
+            finally:
+                with self._lock:
+                    self._task_running = False
+                self._task_queue.task_done()
 
     def ensure_env(self) -> ARXRobotEnv:
         if self._env is None:
@@ -96,7 +155,7 @@ class DemoController:
                 max_v_xyz=0.15,
                 max_a_xyz=0.1,
                 max_v_rpy=0.5,
-                max_a_rpy=0.6,
+                max_a_rpy=0.7,
                 camera_type="all",
                 camera_view=("camera_l", "camera_h", "camera_r"),
                 img_size=(640, 480),
@@ -118,7 +177,7 @@ class DemoController:
         while not self._shutdown.is_set():
             env = self._env
             if env is None:
-                time.sleep(0.2)
+                time.sleep(CAMERA_IDLE_SLEEP_S)
                 continue
             try:
                 frames, status = env.get_camera(
@@ -136,11 +195,12 @@ class DemoController:
                 if not self._camera_error_logged:
                     self._append_log(f"Camera poll failed: {exc}")
                     self._camera_error_logged = True
-            time.sleep(0.15)
+            time.sleep(CAMERA_POLL_INTERVAL_S)
 
     def close(self) -> None:
         self._shutdown.set()
         self._stop_task.set()
+        self._task_queue.put(None)
         if self._env is not None:
             try:
                 self._env.close()
@@ -182,20 +242,10 @@ class DemoController:
                 }
             return
 
-        if event == "debug":
-            panel = str(payload.get("panel", "manip"))
-            image = payload.get("image")
-            if isinstance(image, np.ndarray):
-                with self._lock:
-                    if panel == "nav":
-                        self._state.nav_debug_image = image
-                    else:
-                        self._state.manip_debug_image = image
-            return
-
         with self._lock:
             if event == "parsed_request":
                 self._state.parsed_request = dict(payload)
+                self._state.telemetry["parsed_request"] = dict(payload)
             elif event == "result":
                 self._state.result = dict(payload)
                 status = str(payload.get("status", "completed"))
@@ -209,40 +259,59 @@ class DemoController:
                 self._state.telemetry[event] = dict(payload)
 
     def _begin_task(self, task_name: str, debug_enabled: bool) -> Optional[str]:
-        if self._task_thread is not None and self._task_thread.is_alive():
-            return "Another task is still running."
+        with self._lock:
+            if self._task_running:
+                return "Another task is still running."
+            self._task_running = True
         self.ensure_env()
         self._stop_task = threading.Event()
         with self._lock:
             self._state.active_task = task_name
             self._state.task_state = "starting"
             self._state.current_stage = "Preparing task"
-            self._state.nav_debug_image = None
-            self._state.manip_debug_image = None
             self._state.parsed_request = None
-            self._state.telemetry = {"debug_enabled": debug_enabled}
+            self._state.telemetry = {"local_debug_enabled": debug_enabled}
             self._state.result = None
             self._state.logs = []
             self._state.last_error = ""
         return None
 
+    def _reset_after_task(self, task_name: str, env: Optional[ARXRobotEnv]) -> None:
+        if env is None or self._shutdown.is_set():
+            return
+        self._append_log(f"Reset robot after {task_name}")
+        self._set_task_header(task_name, "resetting", "Reset robot")
+        try:
+            env.reset()
+        except Exception as exc:
+            self._append_log(f"Reset after {task_name} failed: {exc}")
+            with self._lock:
+                self._state.task_state = "failed"
+                self._state.current_stage = "Reset failed"
+                self._state.last_error = str(exc)
+            return
+        with self._lock:
+            self._state.active_task = "idle"
+            self._state.task_state = "idle"
+            self._state.current_stage = "Waiting for task"
+
     def start_nav_dual_sweep(
         self,
         prompt: str,
-        page_debug: bool,
         distance: float,
         nav_lift_height: float,
-        nav_depth_median_n: int,
-        swap_depth_median_n: int,
-        vote_times: int,
     ) -> str:
         if not prompt.strip():
             return "Prompt is required."
-        error = self._begin_task("nav dual sweep", page_debug)
+        error = self._begin_task(
+            "nav dual sweep",
+            DEFAULT_NAV_LOCAL_DEBUG or DEFAULT_SWAP_LOCAL_DEBUG,
+        )
         if error:
             return error
 
         def _runner() -> None:
+            env: Optional[ARXRobotEnv] = None
             try:
                 env = self.ensure_env()
                 self._append_log("Reset robot before nav dual sweep")
@@ -252,18 +321,18 @@ class DemoController:
                 visualize = VisualizeContext(
                     on_event=self.handle_event,
                     stop_checker=self._stop_task.is_set,
-                    page_debug=bool(page_debug),
+                    page_debug=False,
                 )
                 nav_dual_sweep(
                     env,
                     goal=prompt.strip(),
                     distance=float(distance),
                     nav_lift_height=float(nav_lift_height),
-                    nav_debug_raw=bool(page_debug),
-                    swap_debug_raw=bool(page_debug),
-                    nav_depth_median_n=int(nav_depth_median_n),
-                    swap_depth_median_n=int(swap_depth_median_n),
-                    vote_times=int(vote_times),
+                    nav_debug_raw=DEFAULT_NAV_LOCAL_DEBUG,
+                    swap_debug_raw=DEFAULT_SWAP_LOCAL_DEBUG,
+                    nav_depth_median_n=DEFAULT_NAV_DEPTH_MEDIAN_N,
+                    swap_depth_median_n=DEFAULT_SWAP_DEPTH_MEDIAN_N,
+                    vote_times=DEFAULT_NAV_VOTE_TIMES,
                     visualize=visualize,
                 )
                 if self._stop_task.is_set():
@@ -292,35 +361,30 @@ class DemoController:
                     self._state.current_stage = "Task failed"
                     self._state.last_error = str(exc)
             finally:
+                self._reset_after_task("nav dual sweep", env)
                 with self._lock:
                     if self._state.task_state == "running":
                         self._state.task_state = "completed"
 
-        self._task_thread = threading.Thread(
-            target=_runner,
-            name="nav-dual-sweep-task",
-            daemon=True,
-        )
-        self._task_thread.start()
+        self._task_queue.put(_runner)
         return "Started nav dual sweep."
 
     def start_smart_shelf_search(
         self,
         request: str,
-        nav_debug: bool,
-        pick_debug: bool,
         first_nav_height: float,
-        rotate_recover: bool,
-        depth_median_n: int,
     ) -> str:
         if not request.strip():
             return "Request is required."
-        page_debug = bool(nav_debug or pick_debug)
-        error = self._begin_task("smart shelf search", page_debug)
+        error = self._begin_task(
+            "smart shelf search",
+            DEFAULT_SHELF_NAV_DEBUG or DEFAULT_SHELF_PICK_DEBUG,
+        )
         if error:
             return error
 
         def _runner() -> None:
+            env: Optional[ARXRobotEnv] = None
             try:
                 env = self.ensure_env()
                 self._append_log("Reset robot before smart shelf search")
@@ -330,16 +394,16 @@ class DemoController:
                 visualize = VisualizeContext(
                     on_event=self.handle_event,
                     stop_checker=self._stop_task.is_set,
-                    page_debug=page_debug,
+                    page_debug=False,
                 )
                 result = smart_shelf_search_from_request(
                     arx=env,
                     request=request.strip(),
                     first_nav_height=float(first_nav_height),
-                    rotate_recover=bool(rotate_recover),
-                    nav_debug=bool(nav_debug),
-                    debug_pick_place=bool(pick_debug),
-                    depth_median_n=int(depth_median_n),
+                    rotate_recover=DEFAULT_SHELF_ROTATE_RECOVER,
+                    nav_debug=DEFAULT_SHELF_NAV_DEBUG,
+                    debug_pick_place=DEFAULT_SHELF_PICK_DEBUG,
+                    depth_median_n=DEFAULT_SHELF_DEPTH_MEDIAN_N,
                     visualize=visualize,
                 )
                 message = str(result.get("message", ""))
@@ -362,16 +426,19 @@ class DemoController:
                     self._state.task_state = "failed"
                     self._state.current_stage = "Task failed"
                     self._state.last_error = str(exc)
+            finally:
+                self._reset_after_task("smart shelf search", env)
 
-        self._task_thread = threading.Thread(
-            target=_runner,
-            name="smart-shelf-search-task",
-            daemon=True,
-        )
-        self._task_thread.start()
+        self._task_queue.put(_runner)
         return "Started smart shelf search."
 
     def stop_current_task(self) -> str:
+        with self._lock:
+            is_running = self._task_running
+            task_state = self._state.task_state
+        if not is_running and task_state not in {"running", "starting", "stopping"}:
+            return "No task is running."
+
         self._stop_task.set()
         self._append_log("Stop requested from page")
         with self._lock:
@@ -415,9 +482,6 @@ class DemoController:
         with self._lock:
             state = self._state
             frames = dict(state.frames)
-            nav_debug_image = state.nav_debug_image
-            manip_debug_image = state.manip_debug_image
-            parsed_request = state.parsed_request
             telemetry = dict(state.telemetry)
             result = state.result
             logs = list(state.logs)
@@ -428,14 +492,11 @@ class DemoController:
 
         return (
             self._summarize_status(),
-            frames.get("camera_l_color"),
-            frames.get("camera_h_color"),
-            frames.get("camera_r_color"),
-            nav_debug_image,
-            manip_debug_image,
-            _dump_json(parsed_request or {}),
-            _dump_json(telemetry or {}),
+            _to_display_image(frames.get("camera_l_color")),
+            _to_display_image(frames.get("camera_h_color")),
+            _to_display_image(frames.get("camera_r_color")),
             "\n".join(logs[-80:]),
+            _dump_json(telemetry or {}),
         )
 
 
@@ -455,8 +516,8 @@ def build_app(controller: DemoController):
     with gr.Blocks(title="ARX Demo Console") as demo:
         gr.Markdown(
             "# ARX Demo Console\n"
-            "Three camera feeds stay live. When page debug is enabled, navigation "
-            "and manipulation overlays are also pushed into the debug panels below."
+            "Three camera feeds stay live. Task debug stays in the original "
+            "terminal and local OpenCV windows."
         )
 
         action_feedback = gr.Textbox(
@@ -471,14 +532,37 @@ def build_app(controller: DemoController):
             cam_h = gr.Image(label="camera_h", interactive=False)
             cam_r = gr.Image(label="camera_r", interactive=False)
 
-        with gr.Row():
-            nav_debug = gr.Image(label="Navigation Debug", interactive=False)
-            manip_debug = gr.Image(
-                label="Manipulation Debug", interactive=False)
+        with gr.Tabs():
+            with gr.Tab("Nav Dual Sweep"):
+                nav_prompt = gr.Textbox(
+                    label="Prompt",
+                    value="paper cup or paper ball or bottle on the floor",
+                )
+                with gr.Accordion("Advanced", open=False):
+                    nav_distance = gr.Number(label="Stop Distance", value=0.525)
+                    nav_lift_height = gr.Number(
+                        label="Nav Lift Height", value=0.0)
+                start_nav_btn = gr.Button(
+                    "Start Nav Dual Sweep", variant="primary")
+
+            with gr.Tab("Smart Shelf Search"):
+                shelf_request = gr.Textbox(
+                    label="Request",
+                    value="我要一个蓝色盒子",
+                )
+                with gr.Accordion("Advanced", open=False):
+                    first_nav_height = gr.Number(
+                        label="First Nav Height",
+                        value=14.5,
+                    )
+                start_shelf_btn = gr.Button(
+                    "Start Smart Shelf Search",
+                    variant="primary",
+                )
 
         with gr.Row():
-            parsed_request_box = gr.Textbox(
-                label="Resolved Request / Prompts",
+            log_box = gr.Textbox(
+                label="Runtime Log",
                 lines=12,
                 interactive=False,
             )
@@ -488,88 +572,14 @@ def build_app(controller: DemoController):
                 interactive=False,
             )
 
-        log_box = gr.Textbox(
-            label="Runtime Log",
-            lines=14,
-            interactive=False,
-        )
-
-        with gr.Tabs():
-            with gr.Tab("Nav Dual Sweep"):
-                nav_prompt = gr.Textbox(
-                    label="Prompt",
-                    value="paper cup or paper ball or bottle on the floor",
-                )
-                nav_page_debug = gr.Checkbox(
-                    label="Debug Overlay In Page",
-                    value=False,
-                )
-                with gr.Accordion("Advanced", open=False):
-                    nav_distance = gr.Number(label="Stop Distance", value=0.51)
-                    nav_lift_height = gr.Number(
-                        label="Nav Lift Height", value=0.0)
-                    nav_depth_median_n = gr.Number(
-                        label="Nav Depth Median N",
-                        value=5,
-                        precision=0,
-                    )
-                    swap_depth_median_n = gr.Number(
-                        label="Swap Depth Median N",
-                        value=5,
-                        precision=0,
-                    )
-                    vote_times = gr.Number(
-                        label="Vote Times",
-                        value=3,
-                        precision=0,
-                    )
-                start_nav_btn = gr.Button(
-                    "Start Nav Dual Sweep", variant="primary")
-
-            with gr.Tab("Smart Shelf Search"):
-                shelf_request = gr.Textbox(
-                    label="Request",
-                    value="我要一个蓝色盒子",
-                )
-                shelf_nav_debug = gr.Checkbox(
-                    label="Show Navigation Debug In Page",
-                    value=False,
-                )
-                shelf_pick_debug = gr.Checkbox(
-                    label="Show Pick/Place Debug In Page",
-                    value=False,
-                )
-                with gr.Accordion("Advanced", open=False):
-                    first_nav_height = gr.Number(
-                        label="First Nav Height",
-                        value=14.5,
-                    )
-                    rotate_recover = gr.Checkbox(
-                        label="Rotate Recover",
-                        value=True,
-                    )
-                    shelf_depth_median_n = gr.Number(
-                        label="Depth Median N",
-                        value=10,
-                        precision=0,
-                    )
-                start_shelf_btn = gr.Button(
-                    "Start Smart Shelf Search",
-                    variant="primary",
-                )
-
         stop_btn = gr.Button("Stop Current Task", variant="stop")
 
         start_nav_btn.click(
             fn=controller.start_nav_dual_sweep,
             inputs=[
                 nav_prompt,
-                nav_page_debug,
                 nav_distance,
                 nav_lift_height,
-                nav_depth_median_n,
-                swap_depth_median_n,
-                vote_times,
             ],
             outputs=[action_feedback],
             queue=False,
@@ -578,11 +588,7 @@ def build_app(controller: DemoController):
             fn=controller.start_smart_shelf_search,
             inputs=[
                 shelf_request,
-                shelf_nav_debug,
-                shelf_pick_debug,
                 first_nav_height,
-                rotate_recover,
-                shelf_depth_median_n,
             ],
             outputs=[action_feedback],
             queue=False,
@@ -593,7 +599,7 @@ def build_app(controller: DemoController):
             queue=False,
         )
 
-        timer = gr.Timer(0.3)
+        timer = gr.Timer(UI_REFRESH_INTERVAL_S)
         timer.tick(
             fn=controller.read_ui_state,
             outputs=[
@@ -601,11 +607,8 @@ def build_app(controller: DemoController):
                 cam_l,
                 cam_h,
                 cam_r,
-                nav_debug,
-                manip_debug,
-                parsed_request_box,
-                telemetry_box,
                 log_box,
+                telemetry_box,
             ],
             queue=False,
         )

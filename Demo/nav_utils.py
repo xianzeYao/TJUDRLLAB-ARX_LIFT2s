@@ -28,7 +28,7 @@ def step_base_lift_duration(
     poll_interval_s: float = 0.01,
     lift_step: float = 0.03,
 ) -> bool:
-    """在固定时长内持续发送底盘+升降命令；未给高度目标时保持当前高度。"""
+    """在固定时长内持续发送底盘+升降命令；底盘动作结束后可补齐剩余升降。"""
     if duration <= 0:
         print("base+lift move duration must be positive")
         return True
@@ -65,6 +65,14 @@ def step_base_lift_duration(
             time.sleep(min(poll_interval_s, remaining))
     finally:
         arx.step_base_lift(0.0, 0.0, 0.0, float(curr_height))
+
+    if completed and height is not None:
+        base_status = arx.get_robot_status().get("base")
+        actual_height = (
+            float(base_status.height) if base_status is not None else curr_height
+        )
+        if abs(target_height - actual_height) > 1e-3:
+            arx.step_lift(float(target_height))
 
     return completed
 

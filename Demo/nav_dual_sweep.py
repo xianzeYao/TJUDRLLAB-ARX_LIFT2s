@@ -33,26 +33,47 @@ def nav_dual_sweep(
 ) -> None:
     old_settings = init_keyboard()
     cycle_idx = 0
+    quit_requested = False
+    base_stop_checker = None if visualize is None else visualize.stop_checker
+
+    def _stop_checker() -> bool:
+        nonlocal quit_requested
+        if quit_requested:
+            return True
+        if base_stop_checker is not None:
+            try:
+                if base_stop_checker():
+                    return True
+            except Exception:
+                pass
+        if get_key_nonblock() == "q":
+            quit_requested = True
+            return True
+        return False
+
+    task_visualize = VisualizeContext(
+        on_event=None if visualize is None else visualize.on_event,
+        stop_checker=_stop_checker,
+        page_debug=False if visualize is None else visualize.page_debug,
+    )
 
     def _should_stop() -> bool:
-        if should_stop(visualize):
-            return True
-        return get_key_nonblock() == "q"
+        return should_stop(task_visualize)
 
     try:
         emit_stage(
-            visualize,
+            task_visualize,
             source="nav_dual_sweep",
             stage="start",
             message=f"Start nav dual sweep for {goal}",
             goal=goal,
         )
-        pick_tools(arx, visualize=visualize)
+        pick_tools(arx, visualize=task_visualize)
 
         while True:
             cycle_idx += 1
             emit_stage(
-                visualize,
+                task_visualize,
                 source="nav_dual_sweep",
                 stage="cycle",
                 message=f"Start sweep cycle {cycle_idx}",
@@ -61,7 +82,7 @@ def nav_dual_sweep(
             if _should_stop():
                 print("Stop signal received.")
                 emit_result(
-                    visualize,
+                    task_visualize,
                     source="nav_dual_sweep",
                     status="stopped",
                     message="nav dual sweep stopped",
@@ -72,7 +93,7 @@ def nav_dual_sweep(
             if _should_stop():
                 print("Stop signal received.")
                 emit_result(
-                    visualize,
+                    task_visualize,
                     source="nav_dual_sweep",
                     status="stopped",
                     message="nav dual sweep stopped",
@@ -85,7 +106,7 @@ def nav_dual_sweep(
             }
             arx.step_smooth_eef(lift_action)
             emit_stage(
-                visualize,
+                task_visualize,
                 source="nav_dual_sweep",
                 stage="nav",
                 message=f"Cycle {cycle_idx}: navigate to target",
@@ -96,19 +117,29 @@ def nav_dual_sweep(
                 goal=goal,
                 distance=distance,
                 lift_height=nav_lift_height,
-                offset=0.48,
+                offset=0.47,
                 continuous=False,
                 debug_raw=nav_debug_raw,
                 depth_median_n=nav_depth_median_n,
                 vote_times=vote_times,
                 rotate_search_on_miss=True,
                 use_initial_search_roi=True,
-                visualize=visualize,
+                visualize=task_visualize,
             )
             if nav_result is None:
+                if _should_stop():
+                    print("Stop signal received.")
+                    emit_result(
+                        task_visualize,
+                        source="nav_dual_sweep",
+                        status="stopped",
+                        message="nav dual sweep stopped",
+                        cycle_index=cycle_idx,
+                    )
+                    return
                 print("nav_to_goal failed, retry next cycle")
                 emit_log(
-                    visualize,
+                    task_visualize,
                     source="nav_dual_sweep",
                     stage="nav",
                     message="nav_to_goal failed, retry next cycle",
@@ -119,7 +150,7 @@ def nav_dual_sweep(
             if _should_stop():
                 print("Stop signal received.")
                 emit_result(
-                    visualize,
+                    task_visualize,
                     source="nav_dual_sweep",
                     status="stopped",
                     message="nav dual sweep stopped",
@@ -128,7 +159,7 @@ def nav_dual_sweep(
                 return
             arx.step_lift(0.0)
             emit_stage(
-                visualize,
+                task_visualize,
                 source="nav_dual_sweep",
                 stage="swap",
                 message=f"Cycle {cycle_idx}: execute dual sweep",
@@ -139,13 +170,23 @@ def nav_dual_sweep(
                 object_prompt=goal,
                 debug_raw=swap_debug_raw,
                 depth_median_n=swap_depth_median_n,
-                visualize=visualize,
+                visualize=task_visualize,
             )
 
             if swap_result is None:
+                if _should_stop():
+                    print("Stop signal received.")
+                    emit_result(
+                        task_visualize,
+                        source="nav_dual_sweep",
+                        status="stopped",
+                        message="nav dual sweep stopped",
+                        cycle_index=cycle_idx,
+                    )
+                    return
                 print("dual_swap failed, retry next cycle")
                 emit_log(
-                    visualize,
+                    task_visualize,
                     source="nav_dual_sweep",
                     stage="swap",
                     message="dual_swap failed, retry next cycle",
@@ -154,7 +195,7 @@ def nav_dual_sweep(
                 continue
     finally:
         arx.step_lift(0.0)
-        release_tools(arx, visualize=visualize)
+        release_tools(arx, visualize=task_visualize)
         restore_keyboard(old_settings)
 
 
@@ -175,7 +216,7 @@ def main():
         nav_dual_sweep(
             arx,
             goal="paper cup or paper ball or bottle on the floor",
-            distance=0.51,
+            distance=0.525,
             nav_lift_height=0.0,
             nav_debug_raw=True,
             swap_debug_raw=True,

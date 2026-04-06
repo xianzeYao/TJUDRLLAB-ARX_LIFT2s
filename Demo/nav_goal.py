@@ -216,10 +216,6 @@ def nav_to_goal(
                 _log("Stop signal received.", stage="stopped")
                 return last_result
             key = get_key_nonblock()
-            if key == "q":
-                _stop_rotate_search()
-                _log("Stop signal received.", stage="stopped")
-                return last_result
             if key == "n":
                 _stop_rotate_search()
                 arx.step_base(0.0, 0.0, 0.0)

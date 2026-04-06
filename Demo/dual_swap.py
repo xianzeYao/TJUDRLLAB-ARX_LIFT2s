@@ -332,7 +332,11 @@ def _detect_swap_target(
             )
             return trash_base_point
 
-        vis = render_dual_swap_debug_view(color, (u, v))
+        vis = render_dual_swap_debug_view(
+            color,
+            (u, v),
+            object_prompt=object_prompt,
+        )
         emit_event(
             visualize,
             "swap_target",
