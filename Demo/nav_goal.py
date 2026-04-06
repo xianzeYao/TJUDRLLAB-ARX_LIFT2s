@@ -157,6 +157,7 @@ def _confirm_debug_view(
     points,
     goal_pixel,
     roi_polygon: Optional[np.ndarray] = None,
+    nav_prompt: Optional[str] = None,
 ) -> Literal[True, False, None]:
     vis = color.copy()
     if roi_polygon is not None:
@@ -183,6 +184,52 @@ def _confirm_debug_view(
         color=(0, 255, 0),
         thickness=2,
     )
+
+    if nav_prompt:
+        overlay_lines = [f"prompt: {nav_prompt}",
+                         "ENTER: accept  R: refresh  Q: quit"]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.6
+        thickness = 2
+        line_gap = 8
+        x0 = 12
+        y0 = 16
+        text_sizes = [
+            cv2.getTextSize(line, font, scale, thickness)[0]
+            for line in overlay_lines
+        ]
+        box_w = max(size[0] for size in text_sizes) + 16
+        box_h = sum(size[1] for size in text_sizes) + line_gap * (
+            len(overlay_lines) - 1
+        ) + 16
+        cv2.rectangle(
+            vis,
+            (x0, y0),
+            (x0 + box_w, y0 + box_h),
+            color=(32, 32, 32),
+            thickness=-1,
+        )
+        cv2.rectangle(
+            vis,
+            (x0, y0),
+            (x0 + box_w, y0 + box_h),
+            color=(220, 220, 220),
+            thickness=1,
+        )
+        cursor_y = y0 + 10
+        for line, size in zip(overlay_lines, text_sizes):
+            baseline_y = cursor_y + size[1]
+            cv2.putText(
+                vis,
+                line,
+                (x0 + 8, baseline_y),
+                font,
+                scale,
+                (255, 255, 255),
+                thickness,
+                cv2.LINE_AA,
+            )
+            cursor_y = baseline_y + line_gap
 
     win = "nav_goal_debug"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
@@ -217,7 +264,7 @@ def nav_to_goal(
     continuous: bool = False,
     debug_raw: bool = False,
     depth_median_n: int = 5,
-    vote_times: int = 5,
+    vote_times: int = 3,
     rotate_search_on_miss: bool = False,
     use_initial_search_roi: bool = False,
 ):
@@ -360,6 +407,7 @@ def nav_to_goal(
                     points,
                     goal_pixel,
                     roi_polygon=goal_point_roi_polygon,
+                    nav_prompt=goal,
                 )
                 if debug_result is None:
                     _stop_rotate_search()
@@ -369,26 +417,27 @@ def nav_to_goal(
                     print("Refresh requested.")
                     continue
 
+            lift_height_target = None
             if use_goal_z_for_lift:
                 base_status = arx.get_robot_status().get("base")
                 current_lift = float(
                     base_status.height) if base_status is not None else float(lift_height)
-                estimated_lift = estimate_lift_from_goal_z(
+                lift_height_target = float(estimate_lift_from_goal_z(
                     goal_z=float(goal_pw[2]),
                     current_lift=current_lift,
                     target_goal_z=target_goal_z,
-                )
+                ))
                 print(
                     f"detected goal_pw[2]={float(goal_pw[2]):.4f}, "
                     f"current_lift={current_lift:.3f}, "
-                    f"target_lift={estimated_lift:.3f}"
+                    f"target_lift={lift_height_target:.3f}"
                 )
-                arx.step_lift(estimated_lift)
             executed_rotations, interrupted = execute_nav_actions(
                 arx,
                 actions,
                 distance=distance,
                 stop_checker=_check_nav_emergency_stop,
+                lift_height_target=lift_height_target,
             )
             if interrupted:
                 _stop_rotate_search()

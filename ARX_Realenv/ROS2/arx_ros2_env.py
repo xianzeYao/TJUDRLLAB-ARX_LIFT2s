@@ -82,6 +82,24 @@ class ARXRobotEnv():
             return (False, "base command not sent")
         return (True, None)
 
+    def _apply_base_lift(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        height: float,
+    ) -> Tuple[bool, str | None]:
+        """Internal: publish one combined base+lft command."""
+        msg = PosCmd()
+        msg.height = float(height)
+        msg.chx = float(vx)
+        msg.chy = float(vy)
+        msg.chz = float(vz)
+        msg.mode1 = 1
+        if not self.node.send_base_msg(msg):
+            return (False, "base command not sent")
+        return (True, None)
+
     def _apply_smooth_action(self, action: Dict[str, np.ndarray]) -> Tuple[bool, str | None]:
         """
         apply to the robot single step control command.
@@ -443,6 +461,22 @@ class ARXRobotEnv():
         success, error = self._apply_base(vx, vy, vz)
         if not success:
             raise RuntimeError(f"Failed to send base command: {error}")
+        if return_observation:
+            return self.get_observation()
+        return None
+
+    def step_base_lift(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        height: float,
+        return_observation: bool = False,
+    ):
+        """Publish one combined base+lft command and return immediately."""
+        success, error = self._apply_base_lift(vx, vy, vz, height)
+        if not success:
+            raise RuntimeError(f"Failed to send base+lift command: {error}")
         if return_observation:
             return self.get_observation()
         return None

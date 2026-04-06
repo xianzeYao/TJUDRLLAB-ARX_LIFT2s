@@ -46,8 +46,10 @@ class MoveAwayRunResult:
 
 
 def _preprocess_text(text: str) -> str:
-    text = re.sub(r"```(?:json|python|text)?\n?(.*?)\n?```", r"\1", text, flags=re.DOTALL)
-    match = re.search(r"<answer>(.*?)</answer>", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"```(?:json|python|text)?\n?(.*?)\n?```",
+                  r"\1", text, flags=re.DOTALL)
+    match = re.search(r"<answer>(.*?)</answer>", text,
+                      flags=re.DOTALL | re.IGNORECASE)
     if match:
         text = match.group(1)
     return text.strip()
@@ -128,7 +130,8 @@ def _decode_block_result(raw: Optional[str]) -> FrontBlockCheckResult:
         blocked = False
     description = ""
     if blocked:
-        description = re.sub(r"^\s*(true|false)\s*[:,\-]?\s*", "", cleaned, flags=re.IGNORECASE)
+        description = re.sub(
+            r"^\s*(true|false)\s*[:,\-]?\s*", "", cleaned, flags=re.IGNORECASE)
         description = _clean_description(description)
     if not blocked:
         description = ""
@@ -142,7 +145,7 @@ def _decode_block_result(raw: Optional[str]) -> FrontBlockCheckResult:
 def _build_front_blocking_prompt(pick_prompt: str) -> str:
     return "\n".join(
         [
-            f"You are checking whether there is something in front of the {pick_prompt}.",
+            f"You are checking whether there is something in front of the {pick_prompt} and blocking it.",
             '"blocked": true or false',
             '"description": short description of the object infront of the {pick_prompt}',
         ]
@@ -281,7 +284,8 @@ def move_away(
 
     try:
         for _ in range(DEFAULT_DETECT_RETRIES):
-            color, depth = _capture_color_depth(arx, depth_median_n=depth_median_n)
+            color, depth = _capture_color_depth(
+                arx, depth_median_n=depth_median_n)
             if color is None or depth is None:
                 continue
 
@@ -382,7 +386,7 @@ def main() -> None:
             pick_prompt="the blue box",
             debug_raw=True,
             depth_median_n=5,
-            home_after_move = True,
+            home_after_move=True,
         )
         print(
             "[move_away_result] "

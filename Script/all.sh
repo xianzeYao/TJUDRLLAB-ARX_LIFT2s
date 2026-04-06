@@ -34,6 +34,8 @@ gnome-terminal -t "h_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_name:=camera_h \
   camera_namespace:=camera_h_namespace \
   serial_no:=_409122274317 \
+  spatial_filter.enable:=true \
+  temporal_filter.enable:=true \
   rgb_camera.enable_auto_white_balance:=false \
   rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \
@@ -54,6 +56,8 @@ gnome-terminal -t "l_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_name:=camera_l \
   camera_namespace:=camera_l_namespace \
   serial_no:=_409122272587 \
+  spatial_filter.enable:=true \
+  temporal_filter.enable:=true \
   rgb_camera.enable_auto_white_balance:=false \
   rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \
@@ -74,6 +78,8 @@ gnome-terminal -t "r_camera" -x  bash -c "cd ${workspace}; cd .. ; cd Src/LIFT/r
   camera_name:=camera_r \
   camera_namespace:=camera_r_namespace \
   serial_no:=_409122272707 \
+  spatial_filter.enable:=true \
+  temporal_filter.enable:=true \
   rgb_camera.enable_auto_white_balance:=false \
   rgb_camera.white_balance:=4600 \
   depth_module.color_profile:=640x480x60 \

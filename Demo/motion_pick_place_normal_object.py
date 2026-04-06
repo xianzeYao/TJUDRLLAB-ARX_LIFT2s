@@ -108,7 +108,7 @@ def make_pick_back_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     active = np.array(
         [
-            (base[0] - GRIPPER_OFFSET-0.08) / 5,
+            (base[0] - GRIPPER_OFFSET-0.08) / 5-0.05,
             0,
             (base[2] + 0.05) / 2 + 0.065,
             0,
@@ -127,7 +127,7 @@ def make_place_move_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [
-            base[0] - GRIPPER_OFFSET - 0.06,
+            base[0] - GRIPPER_OFFSET - 0.05,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT,
             0,
@@ -165,7 +165,7 @@ def make_down_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [
-            base[0] - GRIPPER_OFFSET-0.0015,
+            base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT - 0.06,
             0,
@@ -203,9 +203,9 @@ def make_place_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
     calibrate_offset = _get_calibrate_offset(arm)
     active = np.array(
         [
-            base[0] - GRIPPER_OFFSET - 0.08,
+            base[0] - GRIPPER_OFFSET - 0.05,
             base[1] + calibrate_offset,
-            base[2] + Z_NORMAL_OBJECT,
+            base[2] + Z_NORMAL_OBJECT-0.01,
             0,
             PITCH_NORMAL_OBJECT,
             0,
