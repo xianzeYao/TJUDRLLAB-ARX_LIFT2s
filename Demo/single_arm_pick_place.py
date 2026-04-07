@@ -118,10 +118,45 @@ def _read_current_gripper(arx: ARXRobotEnv, arm: str) -> Optional[float]:
     return float(joint_pos[6])
 
 
-def _predict_one_point(color: np.ndarray, base_prompt: str) -> Tuple[int, int]:
+def _print_decision(title: str, parts: list[tuple[str, object]]) -> None:
+    chunks = []
+    for key, value in parts:
+        if value is None:
+            continue
+        chunks.append(f"{key}={value}")
+    print(f"{title} " + " | ".join(chunks))
+
+
+def _predict_pick_one_point(
+    color: np.ndarray,
+    base_prompt: str,
+) -> Tuple[int, int]:
     u, v = predict_point_from_rgb(
         color,
         text_prompt=base_prompt,
+        assume_bgr=False,
+        temperature=0.0,
+    )
+    return int(round(u)), int(round(v))
+
+
+def _predict_place_one_point(
+    color: np.ndarray,
+    base_prompt: str,
+) -> Tuple[int, int]:
+    all_prompt = (
+        f"Provide ONE 2D point for: {base_prompt}\n\n"
+        "        Rules:\n"
+        '            Output JSON only: [{"point_2d":[x,y]}]\n'
+        "            x,y must be in [0,1000]\n"
+        "            The point MUST NOT be on any other object already inside or placed on the "
+        f" {base_prompt}\n"
+        "        Return JSON only."
+    )
+    u, v = predict_point_from_rgb(
+        color,
+        text_prompt="",
+        all_prompt=all_prompt,
         assume_bgr=False,
         temperature=0.0,
     )
@@ -187,9 +222,9 @@ def _single_arm_pick_place_once(
                     color, pick_prompt, place_prompt
                 )
             elif do_pick:
-                pick_px = _predict_one_point(color, pick_prompt)
+                pick_px = _predict_pick_one_point(color, pick_prompt)
             else:
-                place_px = _predict_one_point(color, place_prompt)
+                place_px = _predict_place_one_point(color, place_prompt)
         except RuntimeError as exc:
             print(f"点位预测失败，自动刷新：{exc}")
             emit_log(
@@ -529,14 +564,6 @@ def single_arm_pick_place(
             if completion_check_mode == "plus":
                 close_target = get_pick_close_target(item_type)
                 actual_gripper = _read_current_gripper(arx, arm)
-                print(
-                    "[pick_place][plus][decision] "
-                    f"arm={arm}, item_type={item_type!r}, "
-                    f"actual_gripper={actual_gripper}, "
-                    f"close_target={close_target:.3f}, "
-                    "rule='actual_gripper >= close_target => empty/failed grasp; "
-                    "actual_gripper < close_target => object likely in gripper'"
-                )
                 emit_event(
                     visualize,
                     "completion_check",
@@ -547,10 +574,14 @@ def single_arm_pick_place(
                     actual_gripper=actual_gripper,
                 )
                 if actual_gripper is not None and actual_gripper >= close_target:
-                    print(
-                        "[pick_place][plus][decision] "
-                        "branch='actual_gripper >= close_target', "
-                        "decision='retry by re-perceive and re-point'"
+                    _print_decision(
+                        "[pick_place][plus][夹爪]",
+                        [
+                            ("actual", actual_gripper),
+                            ("target", f"{close_target:.3f}"),
+                            ("result", "empty"),
+                            ("next", "retry"),
+                        ],
                     )
                     emit_log(
                         visualize,
@@ -573,6 +604,15 @@ def single_arm_pick_place(
                     else:
                         print(f"任务未完成，开始 retry {retry_idx}/{retry_limit}")
                     continue
+                _print_decision(
+                    "[pick_place][plus][夹爪]",
+                    [
+                        ("actual", actual_gripper),
+                        ("target", f"{close_target:.3f}"),
+                        ("result", "has_object"),
+                        ("next", "check_wrist"),
+                    ],
+                )
                 try:
                     check_start = time.time()
                     hand_image, hand_camera_key = capture_hand_check_frame(
@@ -597,11 +637,13 @@ def single_arm_pick_place(
                     )
                     return last_result
                 check_elapsed_s = time.time() - check_start
-                print(
-                    f"[pick_place][plus][decision] wrist_result={wrist_result.status}, "
-                    f"desc:{wrist_result.description}, "
-                    "rule='wrist success => continue; wrist fail => check third-person', "
-                    f"elapsed_s={check_elapsed_s:.3f}"
+                _print_decision(
+                    "[pick_place][plus][腕部]",
+                    [
+                        ("result", wrist_result.status),
+                        ("desc", wrist_result.description),
+                        ("elapsed_s", f"{check_elapsed_s:.3f}"),
+                    ],
                 )
                 emit_event(
                     visualize,
@@ -619,10 +661,13 @@ def single_arm_pick_place(
                     hand_camera_key=hand_camera_key,
                 )
                 if wrist_result.status == "success":
-                    print(
-                        "[pick_place][plus][decision] "
-                        "branch='wrist_result == success', "
-                        "decision='continue as pick success'"
+                    _print_decision(
+                        "[pick_place][plus][最终]",
+                        [
+                            ("wrist", "success"),
+                            ("final", "success"),
+                            ("next", "continue"),
+                        ],
                     )
                     return _finish_pick_place_success(
                         arx=arx,
@@ -658,12 +703,13 @@ def single_arm_pick_place(
                     )
                     return last_result
                 third_elapsed_s = time.time() - third_start
-                print(
-                    f"[pick_place][plus][decision] third_result={third_result.status}, "
-                    f"desc:{third_result.description}, "
-                    "rule='third success => target no longer in third-person view; "
-                    "third fail => target still visible in third-person view', "
-                    f"elapsed_s={third_elapsed_s:.3f}"
+                _print_decision(
+                    "[pick_place][plus][第三视角]",
+                    [
+                        ("result", third_result.status),
+                        ("desc", third_result.description),
+                        ("elapsed_s", f"{third_elapsed_s:.3f}"),
+                    ],
                 )
                 emit_event(
                     visualize,
@@ -683,10 +729,14 @@ def single_arm_pick_place(
                     close_target=close_target,
                 )
                 if third_result.status == "success":
-                    print(
-                        "[pick_place][plus][decision] "
-                        "branch='wrist fail + third success', "
-                        "decision='continue as success'"
+                    _print_decision(
+                        "[pick_place][plus][最终]",
+                        [
+                            ("wrist", "fail"),
+                            ("third", "success"),
+                            ("final", "success"),
+                            ("next", "continue"),
+                        ],
                     )
                     emit_log(
                         visualize,
@@ -709,10 +759,14 @@ def single_arm_pick_place(
                         visualize=visualize,
                     )
                 try:
-                    print(
-                        "[pick_place][plus][decision] "
-                        "branch='wrist fail + third fail', "
-                        "decision='return_to_source + home + retry'"
+                    _print_decision(
+                        "[pick_place][plus][最终]",
+                        [
+                            ("wrist", "fail"),
+                            ("third", "fail"),
+                            ("final", "retry"),
+                            ("next", "return_home_retry"),
+                        ],
                     )
                     execute_return_to_source_sequence(
                         arx=arx,
@@ -783,23 +837,15 @@ def single_arm_pick_place(
                 return last_result
             check_elapsed_s = time.time() - check_start
 
-            print(
-                f"[pick_place][legacy_check][decision] status={check_result.status}, "
-                f"desc:{check_result.description}, "
-                f"elapsed_s={check_elapsed_s:.3f}"
+            _print_decision(
+                "[pick_place][legacy_check]",
+                [
+                    ("third", check_result.third_status),
+                    ("wrist", check_result.wrist_status),
+                    ("final", check_result.status),
+                    ("elapsed_s", f"{check_elapsed_s:.3f}"),
+                ],
             )
-            if check_result.third_description is not None:
-                print(
-                    "[pick_place][legacy_check] "
-                    f"third_status={check_result.third_status}, "
-                    f"third_description={check_result.third_description}"
-                )
-            if check_result.wrist_description is not None:
-                print(
-                    "[pick_place][legacy_check] "
-                    f"wrist_status={check_result.wrist_status}, "
-                    f"wrist_description={check_result.wrist_description}"
-                )
             emit_event(
                 visualize,
                 "completion_check",
@@ -814,10 +860,12 @@ def single_arm_pick_place(
                 arm=arm,
             )
             if check_result.status == "success":
-                print(
-                    "[pick_place][legacy_check][decision] "
-                    "branch='final_status == success', "
-                    "decision='continue as success'"
+                _print_decision(
+                    "[pick_place][legacy_check][最终]",
+                    [
+                        ("final", "success"),
+                        ("next", "continue"),
+                    ],
                 )
                 return _finish_pick_place_success(
                     arx=arx,
@@ -833,10 +881,12 @@ def single_arm_pick_place(
             if retry_limit is not None and retry_idx >= retry_limit:
                 print("[pick_place][legacy_check] retry limit reached, stop retry")
                 return last_result
-            print(
-                "[pick_place][legacy_check][decision] "
-                "branch='final_status == fail', "
-                "decision='open+close gripper then retry'"
+            _print_decision(
+                "[pick_place][legacy_check][最终]",
+                [
+                    ("final", "fail"),
+                    ("next", "open_close_retry"),
+                ],
             )
             _open_gripper_at_current_eef(
                 arx=arx,

@@ -39,6 +39,8 @@ DEPLOYMENT_DIR = ROOT_DIR / "Deployment"
 if str(DEPLOYMENT_DIR) not in sys.path:
     sys.path.append(str(DEPLOYMENT_DIR))
 
+NORMAL_OBJECT_PICK_CLOSE_THRESHOLD = -0.1
+
 LIFT_SAMPLES = np.array([0.0, 5.0, 10.0, 15.0, 20.0], dtype=np.float32)
 REF_HEIGHT_SAMPLES_M = np.array(
     [0.55, 0.65, 0.80, 0.92, 1.02], dtype=np.float32)
@@ -259,7 +261,7 @@ def get_pick_close_target(item_type: str) -> float:
     if item_type == "deepbox":
         return float(GRIPPER_DEEPBOX)
     if item_type == "normal object":
-        return float(GRIPPER_NORMAL_OBJECT)
+        return float(NORMAL_OBJECT_PICK_CLOSE_THRESHOLD)
     raise ValueError(f"unknown item_type: {item_type!r}")
 
 
@@ -355,56 +357,86 @@ def execute_pick_place_normal_object_sequence(
             arx.step_smooth_eef(act)
 
 
+def _build_place_sequence_for_item(
+    item_type: str,
+    place_ref: np.ndarray,
+    arm: str,
+):
+    if item_type == "cup":
+        return build_place_cup_sequence(place_ref, arm=arm)
+    if item_type == "straw":
+        return build_place_straw_sequence(place_ref, arm=arm)
+    if item_type == "deepbox":
+        return build_place_deepbox_sequence(place_ref, arm=arm)
+    if item_type == "normal object":
+        return build_place_normal_object_sequence(place_ref, arm=arm)
+    raise ValueError(f"unknown item_type: {item_type!r}")
+
+
+def _raise_lowest_place_z_only(
+    place_seq,
+    *,
+    arm: str,
+    z_raise: float,
+):
+    if abs(float(z_raise)) < 1e-8:
+        return place_seq
+
+    z_values: List[float] = []
+    for act in place_seq:
+        active = act.get(arm)
+        if isinstance(active, np.ndarray) and active.shape[0] >= 3:
+            z_values.append(float(active[2]))
+    if not z_values:
+        return place_seq
+
+    min_z = min(z_values)
+    adjusted_seq = []
+    for act in place_seq:
+        adjusted_act = {}
+        for key, value in act.items():
+            if isinstance(value, np.ndarray):
+                adjusted_act[key] = np.asarray(value, dtype=np.float32).copy()
+            else:
+                adjusted_act[key] = value
+        active = adjusted_act.get(arm)
+        if (
+            isinstance(active, np.ndarray)
+            and active.shape[0] >= 3
+            and np.isclose(float(active[2]), min_z)
+        ):
+            active[2] += float(z_raise)
+        adjusted_seq.append(adjusted_act)
+    return adjusted_seq
+
+
 def execute_return_to_source_sequence(
     arx,
     pick_ref: Optional[np.ndarray],
     arm: str,
     item_type: str,
+    ref_x_shift: float = 0.05,
+    ref_z_shift: float = -0.15,
+    bottom_z_raise: float = 0.05,
 ) -> None:
     """把当前抓着的物体按对应放置模板送回 pick 源位附近释放。"""
     if pick_ref is None:
         raise ValueError("pick_ref 为空")
-    if item_type == "cup":
-        execute_pick_place_cup_sequence(
-            arx=arx,
-            pick_ref=None,
-            place_ref=pick_ref,
-            arm=arm,
-            do_pick=False,
-            do_place=True,
-        )
-        return
-    if item_type == "straw":
-        execute_pick_place_straw_sequence(
-            arx=arx,
-            pick_ref=None,
-            place_ref=pick_ref,
-            arm=arm,
-            do_pick=False,
-            do_place=True,
-        )
-        return
-    if item_type == "deepbox":
-        execute_pick_place_deepbox_sequence(
-            arx=arx,
-            pick_ref=None,
-            place_ref=pick_ref,
-            arm=arm,
-            do_pick=False,
-            do_place=True,
-        )
-        return
-    if item_type == "normal object":
-        execute_pick_place_normal_object_sequence(
-            arx=arx,
-            pick_ref=None,
-            place_ref=pick_ref,
-            arm=arm,
-            do_pick=False,
-            do_place=True,
-        )
-        return
-    raise ValueError(f"unknown item_type: {item_type!r}")
+    adjusted_pick_ref = np.asarray(pick_ref, dtype=np.float32).copy()
+    adjusted_pick_ref[0] += float(ref_x_shift)
+    adjusted_pick_ref[2] += float(ref_z_shift)
+    place_seq = _build_place_sequence_for_item(
+        item_type=item_type,
+        place_ref=adjusted_pick_ref,
+        arm=arm,
+    )
+    place_seq = _raise_lowest_place_z_only(
+        place_seq,
+        arm=arm,
+        z_raise=bottom_z_raise,
+    )
+    for act in place_seq:
+        arx.step_smooth_eef(act)
 
 
 def execute_move_away(

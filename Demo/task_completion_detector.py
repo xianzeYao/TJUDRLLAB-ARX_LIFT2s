@@ -30,6 +30,15 @@ class TaskCheckResult:
     wrist_status: Optional[str] = None
 
 
+def _print_decision(title: str, parts: list[tuple[str, Any]]) -> None:
+    chunks = []
+    for key, value in parts:
+        if value is None:
+            continue
+        chunks.append(f"{key}={value}")
+    print(f"{title} " + " | ".join(chunks))
+
+
 def _preprocess_text(text: str) -> str:
     text = re.sub(r"```(?:json|python|html)?\n?(.*?)\n?```",
                   r"\1", text, flags=re.DOTALL)
@@ -118,10 +127,6 @@ def capture_hand_check_frame(
         frames = arx.get_camera(target_size=target_size, return_status=False)
         hand_image = frames.get(hand_camera_key) if frames else None
         if hand_image is not None:
-            print(
-                f"[task_check][capture_hand] arm={arm}, key={hand_camera_key}, "
-                f"shape={tuple(hand_image.shape)}"
-            )
             return hand_image, hand_camera_key
         time.sleep(max(0.0, float(retry_sleep_s)))
 
@@ -151,10 +156,6 @@ def capture_third_check_frame(
         frames = arx.get_camera(target_size=target_size, return_status=False)
         third_image = frames.get(third_camera_key) if frames else None
         if third_image is not None:
-            print(
-                f"[task_check][capture_third] key={third_camera_key}, "
-                f"shape={tuple(third_image.shape)}"
-            )
             return third_image, third_camera_key
         time.sleep(max(0.0, float(retry_sleep_s)))
 
@@ -190,11 +191,6 @@ def capture_task_check_frames(
         hand_image = frames.get(hand_camera_key) if frames else None
         third_image = frames.get(third_camera_key) if frames else None
         if hand_image is not None and third_image is not None:
-            print(
-                "[task_check][capture_pair] "
-                f"arm={arm}, hand_key={hand_camera_key}, third_key={third_camera_key}, "
-                f"hand_shape={tuple(hand_image.shape)}, third_shape={tuple(third_image.shape)}"
-            )
             return hand_image, third_image, hand_camera_key, third_camera_key
         time.sleep(max(0.0, float(retry_sleep_s)))
 
@@ -337,12 +333,14 @@ def predict_third_person_target_check(
         seed=seed,
         max_tokens=max_tokens,
     )
-    print(
-        "[task_check][third_only][decision] "
-        f"rule='success iff target no longer in view', "
-        f"pick_prompt={pick_prompt!r}, "
-        f"decision_status={result.status}, "
-        f"decision_desc={result.description}"
+    _print_decision(
+        "[task_check][第三视角]",
+        [
+            ("target", repr(pick_prompt)),
+            ("result", result.status),
+            ("rule", "不在第三视角里才算success"),
+            ("desc", result.description),
+        ],
     )
     return result
 
@@ -372,12 +370,14 @@ def predict_wrist_target_check(
         seed=seed,
         max_tokens=max_tokens,
     )
-    print(
-        "[task_check][wrist_only][decision] "
-        f"rule='success iff target held securely by gripper', "
-        f"pick_prompt={pick_prompt!r}, "
-        f"decision_status={result.status}, "
-        f"decision_desc={result.description}"
+    _print_decision(
+        "[task_check][腕部]",
+        [
+            ("target", repr(pick_prompt)),
+            ("result", result.status),
+            ("rule", "被夹爪稳定抓住才算success"),
+            ("desc", result.description),
+        ],
     )
     return result
 
@@ -421,11 +421,14 @@ def predict_task_completion(
             status=str(parsed["status"]),
             description=str(parsed["description"]),
         )
-        print(
-            "[task_check][multi_image][decision] "
-            f"pick_prompt={pick_prompt!r}, "
-            f"decision_status={result.status}, "
-            f"decision_desc={result.description}"
+        _print_decision(
+            "[task_check][multi_image]",
+            [
+                ("target", repr(pick_prompt)),
+                ("result", result.status),
+                ("rule", "双图联合直接输出success/fail"),
+                ("desc", result.description),
+            ],
         )
         return result
 
@@ -461,17 +464,15 @@ def predict_task_completion(
     combined_description = (
         f"third={third_result.description}; wrist={wrist_result.description}"
     )
-    print(
-        "[task_check][single_image][decision] "
-        f"pick_prompt={pick_prompt!r}, "
-        "third_rule='success iff target no longer in view', "
-        f"third_status={third_result.status}, "
-        f"third_desc={third_result.description}, "
-        "wrist_rule='success iff target held securely by gripper', "
-        f"wrist_status={wrist_result.status}, "
-        f"wrist_desc={wrist_result.description}, "
-        "final_rule='third OR wrist', "
-        f"decision_status={final_status}"
+    _print_decision(
+        "[task_check][single_image]",
+        [
+            ("target", repr(pick_prompt)),
+            ("third", third_result.status),
+            ("wrist", wrist_result.status),
+            ("final", final_status),
+            ("rule", "third OR wrist"),
+        ],
     )
     return TaskCheckResult(
         status=final_status,
@@ -513,11 +514,6 @@ def run_task_completion_check(
         settle_s=settle_s,
         max_retries=max_retries,
         retry_sleep_s=retry_sleep_s,
-    )
-    print(
-        "[task_check][run] "
-        f"mode={mode}, arm={arm}, pick_prompt={pick_prompt!r}, item_type={item_type!r}, "
-        f"hand_key={hand_camera_key}, third_key={third_camera_key}"
     )
     return predict_task_completion(
         hand_image=hand_image,

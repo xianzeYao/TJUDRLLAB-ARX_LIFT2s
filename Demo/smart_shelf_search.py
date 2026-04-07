@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import cv2
+import numpy as np
 
-from demo_utils import step_base_duration
+from demo_utils import (
+    step_base_duration,
+)
 from nav_goal import nav_to_goal
 from move_away import move_away
 from shelf_prompt_parser import ShelfPromptTask, parse_human_shelf_request
@@ -34,7 +37,8 @@ from point2pos_utils import (  # noqa: E402
 )
 
 
-PLACE_PIXEL_OFFSET_Y = 0.23
+PLACE_LATERAL_OFFSET_LEFT_Y = 0.125
+PLACE_LATERAL_OFFSET_RIGHT_Y = 0.375
 PLACE_LATERAL_VY_CMD = 0.75
 PLACE_LATERAL_SPEED_MPS = 0.125
 PLACE_LATERAL_DEADBAND_M = 0.015
@@ -105,16 +109,25 @@ def _strip_place_region_prefix(place_target_prompt: str) -> str:
     return text
 
 
-def _resolve_place_prompt_for_arm(place_target_prompt: str, arm: str) -> str:
-    if arm not in {"left", "right"}:
-        raise ValueError(f"arm must be 'left' or 'right', got: {arm!r}")
-
+def _resolve_place_center_prompt(place_target_prompt: str) -> str:
     target = _strip_place_region_prefix(place_target_prompt)
     if not target:
         raise ValueError("place_target_prompt resolved to empty target")
     if not target.lower().startswith("the "):
         target = f"the {target}"
-    return f"the {arm} center of {target}"
+    return f"the center of {target}"
+
+
+def _resolve_place_final_prompt(place_target_prompt: str) -> str:
+    return _resolve_place_center_prompt(place_target_prompt)
+
+
+def _get_place_lateral_offset_y(arm: str) -> float:
+    if arm == "left":
+        return PLACE_LATERAL_OFFSET_LEFT_Y
+    if arm == "right":
+        return PLACE_LATERAL_OFFSET_RIGHT_Y
+    raise ValueError(f"arm must be 'left' or 'right', got: {arm!r}")
 
 
 def _predict_one_point(color, prompt: str) -> tuple[int, int]:
@@ -130,16 +143,17 @@ def _predict_one_point(color, prompt: str) -> tuple[int, int]:
 def _adjust_place_lateral_once(
     arx: ARXRobotEnv,
     place_prompt: str,
+    arm: str,
     *,
     depth_median_n: int,
     visualize: Optional[VisualizeContext],
     lateral_vy_cmd: float = PLACE_LATERAL_VY_CMD,
     lateral_speed_mps: float = PLACE_LATERAL_SPEED_MPS,
-    center_offset_y: float = PLACE_PIXEL_OFFSET_Y,
     deadband_m: float = PLACE_LATERAL_DEADBAND_M,
     min_duration_s: float = PLACE_LATERAL_MIN_DURATION_S,
 ) -> float:
     """根据放置点做一次底盘左右横移，并返回对后续 forward 段的时间补偿。"""
+    center_offset_y = _get_place_lateral_offset_y(arm)
     color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
     if color is None or depth is None:
         emit_log(
@@ -186,6 +200,7 @@ def _adjust_place_lateral_once(
         stage="place_lateral_adjust",
         message=(
             "place lateral adjust target: "
+            f"prompt={place_prompt}, arm={arm}, offset_y={center_offset_y:.3f}, "
             f"pixel={place_px}, "
             f"xyz=({place_pw[0]:.4f}, {place_pw[1]:.4f}, {place_pw[2]:.4f}), "
             f"delta_y={delta_y:.4f}m"
@@ -469,9 +484,11 @@ def smart_shelf_search(
             arx.step_lift(0.0)
         else:
             arx.step_lift(14.5)
-        resolved_place_prompt = _resolve_place_prompt_for_arm(
+        center_place_prompt = _resolve_place_center_prompt(
             place_target_prompt,
-            pick_arm,
+        )
+        resolved_place_prompt = _resolve_place_final_prompt(
+            place_target_prompt,
         )
         emit_log(
             visualize,
@@ -479,12 +496,22 @@ def smart_shelf_search(
             stage="place_prompt",
             message=(
                 f"resolved place prompt: {resolved_place_prompt} "
-                f"(from target: {place_target_prompt}, arm: {pick_arm})"
+                f"(from target: {place_target_prompt})"
+            ),
+        )
+        emit_log(
+            visualize,
+            source="smart_shelf_search",
+            stage="place_prompt",
+            message=(
+                f"resolved place center prompt: {center_place_prompt} "
+                f"(from target: {place_target_prompt})"
             ),
         )
         place_return_forward_duration += _adjust_place_lateral_once(
             arx=arx,
-            place_prompt=resolved_place_prompt,
+            place_prompt=center_place_prompt,
+            arm=pick_arm,
             depth_median_n=depth_median_n,
             visualize=visualize,
         )

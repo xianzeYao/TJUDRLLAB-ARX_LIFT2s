@@ -130,9 +130,10 @@ def _build_parser_prompt(
         "- Create one task per manipulation sub-request and preserve the original order.\n"
         "- Always return a tasks list, even if there is only one task.\n"
         "- Output short English grounding phrases for pick_target and place_target_prompt.\n"
-        "- pick_target must be a visual noun phrase only, not an action sentence.\n"
+        "- pick_target and place_target_prompt must be a visual noun phrase only, not an action sentence.\n"
+        "- Treat quantity words as the number of repeated pick tasks to create.\n"
         "- If multiple pick targets share the same place target, repeat that place_target_prompt for each task.\n"
-        "- If a task does not specify a place target, set its place_target_prompt to an empty string.\n"
+        "- If a task does not specify where to place object, set its place_target_prompt to an empty string!!!\n"
         f'Request: "{request}"'
     )
 

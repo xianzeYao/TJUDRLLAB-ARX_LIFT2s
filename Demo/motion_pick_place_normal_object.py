@@ -4,9 +4,9 @@ from typing import Dict, Optional
 CLOSE = 0.0
 OPEN = -3.3
 GRIPPER_OFFSET = 0.14
-GRIPPER_NORMAL_OBJECT = -0.05
+GRIPPER_NORMAL_OBJECT = -0.025
 Z_NORMAL_OBJECT = 0.17
-PITCH_NORMAL_OBJECT = 0.39
+PITCH_NORMAL_OBJECT = 0.4
 CALIBRATE_OFFSET_LEFT = 0.015
 CALIBRATE_OFFSET_RIGHT = 0.01
 
@@ -92,7 +92,7 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
         [
             base[0] - GRIPPER_OFFSET - 0.045,
             base[1] + calibrate_offset,
-            base[2] + 0.07,
+            base[2] + 0.075,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -129,7 +129,7 @@ def make_place_move_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
         [
             base[0] - GRIPPER_OFFSET - 0.05,
             base[1] + calibrate_offset,
-            base[2] + Z_NORMAL_OBJECT,
+            base[2] + Z_NORMAL_OBJECT+0.07,
             0,
             PITCH_NORMAL_OBJECT,
             0,
@@ -148,7 +148,7 @@ def make_place_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str
         [
             base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
-            base[2] + Z_NORMAL_OBJECT,
+            base[2] + Z_NORMAL_OBJECT+0.07,
             0,
             PITCH_NORMAL_OBJECT,
             0,
