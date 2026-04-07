@@ -167,6 +167,33 @@ def _get_top_color_frame(
     )
 
 
+def _apply_dual_swap_detection_mask(color: np.ndarray) -> np.ndarray:
+    """Keep only the bottom trapezoid region for dual-sweep target pointing."""
+    if color.ndim < 2:
+        raise ValueError(f"unexpected image shape: {color.shape}")
+
+    height, width = color.shape[:2]
+    top_y = height // 2
+    half_top_width = width // 4
+    center_x = width // 2
+    polygon = np.array(
+        [
+            [0, height - 1],
+            [width - 1, height - 1],
+            [center_x + half_top_width, top_y],
+            [center_x - half_top_width, top_y],
+        ],
+        dtype=np.int32,
+    )
+
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, polygon, 255)
+
+    masked = color.copy()
+    masked[mask == 0] = 0
+    return masked
+
+
 def _judge_continue_swap(
     arx: ARXRobotEnv,
     object_prompt: str,
@@ -303,7 +330,8 @@ def _detect_swap_target(
         if color is None or depth is None:
             continue
 
-        trash_point = predict_point_from_rgb(color, object_prompt)
+        masked_color = _apply_dual_swap_detection_mask(color)
+        trash_point = predict_point_from_rgb(masked_color, object_prompt)
         u, v = int(round(trash_point[0])), int(round(trash_point[1]))
         trash_base_point = pixel_to_base_point_safe(
             (u, v),

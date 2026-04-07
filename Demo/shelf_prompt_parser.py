@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - runtime dependency may be absent on de
 
 
 DEFAULT_NAV_WAYPOINT_PROMPT = "a brown coaster on the floor"
-DEFAULT_PLACE_TARGET_PROMPT = "the center part of the blue plate"
+DEFAULT_PLACE_TARGET_PROMPT = "the blue plate"
 
 
 @dataclass
@@ -122,7 +122,6 @@ def _build_parser_prompt(
         '  "tasks": [\n'
         '    {\n'
         '      "pick_target": "...",\n'
-        '      "nav_waypoint_prompt": "...",\n'
         '      "place_target_prompt": "..."\n'
         '    }\n'
         '  ]\n'
@@ -130,13 +129,10 @@ def _build_parser_prompt(
         "Rules:\n"
         "- Create one task per manipulation sub-request and preserve the original order.\n"
         "- Always return a tasks list, even if there is only one task.\n"
-        "- Output short English grounding phrases for pick_target, place_target_prompt, and nav_waypoint_prompt.\n"
+        "- Output short English grounding phrases for pick_target and place_target_prompt.\n"
         "- pick_target must be a visual noun phrase only, not an action sentence.\n"
         "- If multiple pick targets share the same place target, repeat that place_target_prompt for each task.\n"
-        "- If multiple tasks share the same nav waypoint, repeat that nav_waypoint_prompt for each task.\n"
         "- If a task does not specify a place target, set its place_target_prompt to an empty string.\n"
-        "- nav_waypoint_prompt should be a navigation landmark or approach waypoint only if that task needs one.\n"
-        "- If a task does not specify a nav_waypoint_prompt, set it to an empty string.\n"
         f'Request: "{request}"'
     )
 
@@ -160,24 +156,16 @@ def _extract_task_objects(parsed: dict[str, Any]) -> list[dict[str, Any]]:
     pick_targets = parsed.get("pick_targets")
     if not isinstance(pick_targets, list):
         pick_targets = parsed.get("pick_target_list")
-    nav_waypoints = parsed.get("nav_waypoint_prompts")
-    if not isinstance(nav_waypoints, list):
-        nav_waypoints = parsed.get("nav_waypoint_prompt_list")
-    if not isinstance(nav_waypoints, list):
-        nav_waypoints = parsed.get("nav_target_prompt_list")
     place_targets = parsed.get("place_target_prompts")
     if not isinstance(place_targets, list):
         place_targets = parsed.get("place_target_prompt_list")
     if isinstance(pick_targets, list):
         place_list = place_targets if isinstance(place_targets, list) else []
-        nav_list = nav_waypoints if isinstance(nav_waypoints, list) else []
         for idx, pick_target in enumerate(pick_targets):
-            nav_waypoint_prompt = nav_list[idx] if idx < len(nav_list) else ""
             place_target_prompt = place_list[idx] if idx < len(
                 place_list) else ""
             tasks.append({
                 "pick_target": pick_target,
-                "nav_waypoint_prompt": nav_waypoint_prompt,
                 "place_target_prompt": place_target_prompt,
             })
         if tasks:
@@ -227,10 +215,6 @@ def _parse_with_model(
         pick_target_raw = _clean_text(
             task_data.get("pick_target") or task_data.get("nav_pick_prompt")
         )
-        nav_waypoint_prompt = _clean_text(
-            task_data.get("nav_waypoint_prompt") or task_data.get(
-                "nav_target_prompt")
-        )
         place_target_prompt = _clean_text(
             task_data.get("place_target_prompt") or task_data.get(
                 "place_target")
@@ -245,37 +229,17 @@ def _parse_with_model(
         if use_default_place_target_prompt:
             place_target_prompt = default_place_target_prompt
 
-        use_default_nav_waypoint_prompt = not bool(nav_waypoint_prompt)
-        if use_default_nav_waypoint_prompt:
-            nav_waypoint_prompt = default_nav_waypoint_prompt
-
         tasks.append(ShelfPromptTask(
             nav_pick_prompt=pick_target_raw,
-            nav_waypoint_prompt=nav_waypoint_prompt,
+            nav_waypoint_prompt=default_nav_waypoint_prompt,
             place_target_prompt=place_target_prompt,
             pick_target=pick_target_raw,
-            used_default_nav_waypoint_prompt=use_default_nav_waypoint_prompt,
+            used_default_nav_waypoint_prompt=True,
             used_default_place_target_prompt=use_default_place_target_prompt,
         ))
 
     if not tasks:
         raise RuntimeError(f"missing tasks in parser output: {raw!r}")
-
-    plan_nav_waypoint_prompt = _clean_text(
-        parsed.get("nav_waypoint_prompt") or parsed.get("nav_target_prompt")
-    )
-    if plan_nav_waypoint_prompt:
-        for idx, task in enumerate(tasks):
-            if not task.used_default_nav_waypoint_prompt:
-                continue
-            tasks[idx] = ShelfPromptTask(
-                nav_pick_prompt=task.nav_pick_prompt,
-                nav_waypoint_prompt=plan_nav_waypoint_prompt,
-                place_target_prompt=task.place_target_prompt,
-                pick_target=task.pick_target,
-                used_default_nav_waypoint_prompt=False,
-                used_default_place_target_prompt=task.used_default_place_target_prompt,
-            )
 
     return ShelfPromptPlan(
         raw_request=request,
@@ -310,12 +274,7 @@ def _print_plan(plan: ShelfPromptPlan) -> None:
     for idx, task in enumerate(plan.tasks, start=1):
         print(f"task[{idx}].pick_target = {task.pick_target}")
         print(f"task[{idx}].nav_pick_prompt = {task.nav_pick_prompt}")
-        print(f"task[{idx}].nav_waypoint_prompt = {task.nav_waypoint_prompt}")
         print(f"task[{idx}].place_target_prompt = {task.place_target_prompt}")
-        print(
-            f"task[{idx}].used_default_nav_waypoint_prompt = "
-            f"{task.used_default_nav_waypoint_prompt}"
-        )
         print(
             f"task[{idx}].used_default_place_target_prompt = "
             f"{task.used_default_place_target_prompt}"

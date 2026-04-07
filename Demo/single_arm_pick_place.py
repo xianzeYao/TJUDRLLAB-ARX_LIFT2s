@@ -10,13 +10,21 @@ from demo_utils import (
     execute_pick_place_cup_sequence,
     execute_pick_place_deepbox_sequence,
     execute_pick_place_normal_object_sequence,
+    execute_return_to_source_sequence,
     execute_pick_place_straw_sequence,
+    get_pick_close_target,
 )
 from point2pos_utils import (
     get_aligned_frames,
     pixel_to_ref_point_safe,
 )
-from task_completion_detector import run_task_completion_check
+from task_completion_detector import (
+    capture_hand_check_frame,
+    capture_third_check_frame,
+    predict_third_person_target_check,
+    predict_wrist_target_check,
+    run_task_completion_check,
+)
 from visualize_utils import (
     VisualizeContext,
     dispatch_debug_image,
@@ -95,6 +103,19 @@ def _close_gripper_at_current_eef(
         gripper=0.0,
         delay_s=0.0,
     )
+
+
+def _read_current_gripper(arx: ARXRobotEnv, arm: str) -> Optional[float]:
+    status = arx.get_robot_status().get(arm)
+    if status is None or not hasattr(status, "joint_pos"):
+        print(f"{arm} arm joint status unavailable, skip gripper read")
+        return None
+
+    joint_pos = np.asarray(status.joint_pos, dtype=np.float32).reshape(-1)
+    if joint_pos.size < 7:
+        print(f"{arm} arm joint_pos invalid, skip gripper read")
+        return None
+    return float(joint_pos[6])
 
 
 def _predict_one_point(color: np.ndarray, base_prompt: str) -> Tuple[int, int]:
@@ -318,6 +339,56 @@ def _execute_item_sequence(
         raise ValueError(f"unknown item_type: {item_type!r}")
 
 
+def _finish_pick_place_success(
+    arx: ARXRobotEnv,
+    *,
+    last_result: Tuple[
+        Optional[np.ndarray],
+        Optional[np.ndarray],
+        Optional[Literal["left", "right"]],
+    ],
+    item_type: Literal["cup", "straw", "deepbox", "normal object"],
+    arm: Literal["left", "right"],
+    do_place: bool,
+    release_after_pick: bool,
+    pick_prompt: str,
+    place_prompt: str,
+    visualize: Optional[VisualizeContext],
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Literal["left", "right"]]]:
+    if do_place:
+        emit_stage(
+            visualize,
+            source="single_arm_pick_place",
+            stage="place",
+            message=f"Execute place with {arm} arm",
+            arm=arm,
+        )
+        _execute_item_sequence(
+            arx=arx,
+            item_type=item_type,
+            pick_ref=last_result[0],
+            place_ref=last_result[1],
+            arm=arm,
+            do_pick=False,
+            do_place=True,
+        )
+    elif release_after_pick:
+        _release_gripper_at_current_eef(
+            arx=arx,
+            arm=arm,
+        )
+    emit_result(
+        visualize,
+        source="single_arm_pick_place",
+        status="success",
+        message="single arm pick/place completed",
+        arm=arm,
+        pick_prompt=pick_prompt,
+        place_prompt=place_prompt,
+    )
+    return last_result
+
+
 def single_arm_pick_place(
     arx: ARXRobotEnv,
     pick_prompt: str,
@@ -330,8 +401,8 @@ def single_arm_pick_place(
     release_after_pick: bool = False,
     verify_completion: bool = False,
     completion_retry_attempts: int = 1,
-    completion_check_mode: Literal["single_image",
-                                   "multi_image"] = "single_image",
+    completion_check_mode: Literal["plus", "single_image",
+                                   "multi_image"] = "plus",
     completion_third_camera_view: str = "camera_h",
     completion_hand_camera_by_arm: Optional[Mapping[str, str]] = None,
     completion_settle_s: float = 1.0,
@@ -445,6 +516,249 @@ def single_arm_pick_place(
                         do_pick=True,
                         do_place=False,
                     )
+            except Exception as exc:
+                print(f"pick 执行失败，跳过自动重试: {exc}")
+                emit_log(
+                    visualize,
+                    source="single_arm_pick_place",
+                    stage="pick",
+                    message=f"pick 执行失败，跳过自动重试: {exc}",
+                )
+                return last_result
+
+            if completion_check_mode == "plus":
+                close_target = get_pick_close_target(item_type)
+                actual_gripper = _read_current_gripper(arx, arm)
+                print(
+                    "[pick_place][plus][decision] "
+                    f"arm={arm}, item_type={item_type!r}, "
+                    f"actual_gripper={actual_gripper}, "
+                    f"close_target={close_target:.3f}, "
+                    "rule='actual_gripper >= close_target => empty/failed grasp; "
+                    "actual_gripper < close_target => object likely in gripper'"
+                )
+                emit_event(
+                    visualize,
+                    "completion_check",
+                    source="single_arm_pick_place",
+                    mode="plus",
+                    arm=arm,
+                    close_target=close_target,
+                    actual_gripper=actual_gripper,
+                )
+                if actual_gripper is not None and actual_gripper >= close_target:
+                    print(
+                        "[pick_place][plus][decision] "
+                        "branch='actual_gripper >= close_target', "
+                        "decision='retry by re-perceive and re-point'"
+                    )
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=(
+                            "夹爪接近闭合位，视为未夹到物体，"
+                            f"actual_gripper={actual_gripper:.3f}, "
+                            f"close_target={close_target:.3f}"
+                        ),
+                    )
+                    if retry_limit is not None and retry_idx >= retry_limit:
+                        print(
+                            "[pick_place][plus] retry limit reached after empty-gripper branch"
+                        )
+                        return last_result
+                    retry_idx += 1
+                    if retry_limit is None:
+                        print(f"任务未完成，开始 retry {retry_idx}/inf")
+                    else:
+                        print(f"任务未完成，开始 retry {retry_idx}/{retry_limit}")
+                    continue
+                try:
+                    check_start = time.time()
+                    hand_image, hand_camera_key = capture_hand_check_frame(
+                        arx=arx,
+                        arm=arm,
+                        hand_camera_by_arm=completion_hand_camera_by_arm,
+                        settle_s=completion_settle_s,
+                        max_retries=completion_capture_retries,
+                        retry_sleep_s=completion_capture_retry_sleep_s,
+                    )
+                    wrist_result = predict_wrist_target_check(
+                        hand_image=hand_image,
+                        pick_prompt=pick_prompt,
+                    )
+                except Exception as exc:
+                    print(f"腕部检测失败，跳过自动重试: {exc}")
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=f"腕部检测失败，跳过自动重试: {exc}",
+                    )
+                    return last_result
+                check_elapsed_s = time.time() - check_start
+                print(
+                    f"[pick_place][plus][decision] wrist_result={wrist_result.status}, "
+                    f"desc:{wrist_result.description}, "
+                    "rule='wrist success => continue; wrist fail => check third-person', "
+                    f"elapsed_s={check_elapsed_s:.3f}"
+                )
+                emit_event(
+                    visualize,
+                    "completion_check",
+                    source="single_arm_pick_place",
+                    mode="plus",
+                    status=wrist_result.status,
+                    description=wrist_result.description,
+                    wrist_description=wrist_result.description,
+                    wrist_status=wrist_result.status,
+                    elapsed_s=check_elapsed_s,
+                    arm=arm,
+                    actual_gripper=actual_gripper,
+                    close_target=close_target,
+                    hand_camera_key=hand_camera_key,
+                )
+                if wrist_result.status == "success":
+                    print(
+                        "[pick_place][plus][decision] "
+                        "branch='wrist_result == success', "
+                        "decision='continue as pick success'"
+                    )
+                    return _finish_pick_place_success(
+                        arx=arx,
+                        last_result=last_result,
+                        item_type=item_type,
+                        arm=arm,
+                        do_place=do_place,
+                        release_after_pick=release_after_pick,
+                        pick_prompt=pick_prompt,
+                        place_prompt=place_prompt,
+                        visualize=visualize,
+                    )
+                try:
+                    third_start = time.time()
+                    third_image, third_camera_key = capture_third_check_frame(
+                        arx=arx,
+                        third_camera_view=completion_third_camera_view,
+                        settle_s=completion_settle_s,
+                        max_retries=completion_capture_retries,
+                        retry_sleep_s=completion_capture_retry_sleep_s,
+                    )
+                    third_result = predict_third_person_target_check(
+                        third_image=third_image,
+                        pick_prompt=pick_prompt,
+                    )
+                except Exception as exc:
+                    print(f"第三视角检测失败，跳过自动重试: {exc}")
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=f"第三视角检测失败，跳过自动重试: {exc}",
+                    )
+                    return last_result
+                third_elapsed_s = time.time() - third_start
+                print(
+                    f"[pick_place][plus][decision] third_result={third_result.status}, "
+                    f"desc:{third_result.description}, "
+                    "rule='third success => target no longer in third-person view; "
+                    "third fail => target still visible in third-person view', "
+                    f"elapsed_s={third_elapsed_s:.3f}"
+                )
+                emit_event(
+                    visualize,
+                    "completion_check",
+                    source="single_arm_pick_place",
+                    mode="plus_third_after_wrist_fail",
+                    status=third_result.status,
+                    description=third_result.description,
+                    wrist_description=wrist_result.description,
+                    wrist_status=wrist_result.status,
+                    third_description=third_result.description,
+                    third_status=third_result.status,
+                    elapsed_s=third_elapsed_s,
+                    arm=arm,
+                    third_camera_key=third_camera_key,
+                    actual_gripper=actual_gripper,
+                    close_target=close_target,
+                )
+                if third_result.status == "success":
+                    print(
+                        "[pick_place][plus][decision] "
+                        "branch='wrist fail + third success', "
+                        "decision='continue as success'"
+                    )
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=(
+                            "腕部检测失败，但第三视角未见目标，"
+                            "按成功继续执行"
+                        ),
+                    )
+                    return _finish_pick_place_success(
+                        arx=arx,
+                        last_result=last_result,
+                        item_type=item_type,
+                        arm=arm,
+                        do_place=do_place,
+                        release_after_pick=release_after_pick,
+                        pick_prompt=pick_prompt,
+                        place_prompt=place_prompt,
+                        visualize=visualize,
+                    )
+                try:
+                    print(
+                        "[pick_place][plus][decision] "
+                        "branch='wrist fail + third fail', "
+                        "decision='return_to_source + home + retry'"
+                    )
+                    execute_return_to_source_sequence(
+                        arx=arx,
+                        pick_ref=last_result[0],
+                        arm=arm,
+                        item_type=item_type,
+                    )
+                    success, error_message = arx.set_special_mode(1, side=arm)
+                    if not success:
+                        raise RuntimeError(
+                            f"failed to reset {arm} arm after return_to_source: "
+                            f"{error_message}"
+                        )
+                except Exception as exc:
+                    print(f"放回源位失败，跳过自动重试: {exc}")
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=f"放回源位失败，跳过自动重试: {exc}",
+                    )
+                    return last_result
+                emit_log(
+                    visualize,
+                    source="single_arm_pick_place",
+                    stage="completion_check",
+                    message=(
+                        "腕部检测失败，且第三视角仍见目标，"
+                        "已放回源位并复位，准备重试"
+                    ),
+                )
+                if retry_limit is not None and retry_idx >= retry_limit:
+                    print(
+                        "[pick_place][plus] retry limit reached after return-to-source branch"
+                    )
+                    return last_result
+                retry_idx += 1
+                if retry_limit is None:
+                    print(f"腕部检测失败，已放回源位，开始 retry {retry_idx}/inf")
+                else:
+                    print(
+                        f"腕部检测失败，已放回源位，开始 retry {retry_idx}/{retry_limit}"
+                    )
+                continue
+
+            try:
                 check_start = time.time()
                 check_result = run_task_completion_check(
                     arx=arx,
@@ -470,14 +784,22 @@ def single_arm_pick_place(
             check_elapsed_s = time.time() - check_start
 
             print(
-                f"任务检测结果: {check_result.status}, "
+                f"[pick_place][legacy_check][decision] status={check_result.status}, "
                 f"desc:{check_result.description}, "
                 f"elapsed_s={check_elapsed_s:.3f}"
             )
             if check_result.third_description is not None:
-                print(f"第三视角描述: {check_result.third_description}")
+                print(
+                    "[pick_place][legacy_check] "
+                    f"third_status={check_result.third_status}, "
+                    f"third_description={check_result.third_description}"
+                )
             if check_result.wrist_description is not None:
-                print(f"腕部视角描述: {check_result.wrist_description}")
+                print(
+                    "[pick_place][legacy_check] "
+                    f"wrist_status={check_result.wrist_status}, "
+                    f"wrist_description={check_result.wrist_description}"
+                )
             emit_event(
                 visualize,
                 "completion_check",
@@ -492,52 +814,30 @@ def single_arm_pick_place(
                 arm=arm,
             )
             if check_result.status == "success":
-                if do_place:
-                    emit_stage(
-                        visualize,
-                        source="single_arm_pick_place",
-                        stage="place",
-                        message=f"Execute place with {arm} arm",
-                        arm=arm,
-                    )
-                    _execute_item_sequence(
-                        arx=arx,
-                        item_type=item_type,
-                        pick_ref=last_result[0],
-                        place_ref=last_result[1],
-                        arm=arm,
-                        do_pick=False,
-                        do_place=True,
-                    )
-                elif release_after_pick:
-                    _release_gripper_at_current_eef(
-                        arx=arx,
-                        arm=arm,
-                    )
-                emit_result(
-                    visualize,
-                    source="single_arm_pick_place",
-                    status="success",
-                    message="single arm pick/place completed",
+                print(
+                    "[pick_place][legacy_check][decision] "
+                    "branch='final_status == success', "
+                    "decision='continue as success'"
+                )
+                return _finish_pick_place_success(
+                    arx=arx,
+                    last_result=last_result,
+                    item_type=item_type,
                     arm=arm,
+                    do_place=do_place,
+                    release_after_pick=release_after_pick,
                     pick_prompt=pick_prompt,
                     place_prompt=place_prompt,
+                    visualize=visualize,
                 )
-                return last_result
-            if (
-                check_result.third_status == "success"
-                and check_result.wrist_status != "success"
-            ):
-                print("失去物体视野，退出自动重试")
-                emit_log(
-                    visualize,
-                    source="single_arm_pick_place",
-                    stage="completion_check",
-                    message="失去物体视野，退出自动重试",
-                )
-                return last_result
             if retry_limit is not None and retry_idx >= retry_limit:
+                print("[pick_place][legacy_check] retry limit reached, stop retry")
                 return last_result
+            print(
+                "[pick_place][legacy_check][decision] "
+                "branch='final_status == fail', "
+                "decision='open+close gripper then retry'"
+            )
             _open_gripper_at_current_eef(
                 arx=arx,
                 arm=arm,

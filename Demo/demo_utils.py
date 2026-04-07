@@ -12,16 +12,23 @@ import cv2
 import numpy as np
 
 from arx_pointing import predict_multi_points_from_rgb
-from motion_pick_place_cup import build_pick_cup_sequence, build_place_cup_sequence
+from motion_pick_place_cup import (
+    GRIPPER_CUP,
+    build_pick_cup_sequence,
+    build_place_cup_sequence,
+)
 from motion_pick_place_deepbox import (
+    GRIPPER_DEEPBOX,
     build_pick_deepbox_sequence,
     build_place_deepbox_sequence,
 )
 from motion_pick_place_normal_object import (
+    GRIPPER_NORMAL_OBJECT,
     build_pick_normal_object_sequence,
     build_place_normal_object_sequence,
 )
 from motion_pick_place_straw import (
+    CLOSE as GRIPPER_STRAW,
     build_pick_straw_sequence,
     build_place_straw_sequence,
 )
@@ -243,6 +250,19 @@ def estimate_lift_from_goal_z(
     return float(np.clip(target_lift, min_lift, max_lift))
 
 
+def get_pick_close_target(item_type: str) -> float:
+    """返回指定物体类型 pick 完成后的目标夹爪值。"""
+    if item_type == "cup":
+        return float(GRIPPER_CUP)
+    if item_type == "straw":
+        return float(GRIPPER_STRAW)
+    if item_type == "deepbox":
+        return float(GRIPPER_DEEPBOX)
+    if item_type == "normal object":
+        return float(GRIPPER_NORMAL_OBJECT)
+    raise ValueError(f"unknown item_type: {item_type!r}")
+
+
 def execute_pick_place_cup_sequence(
     arx,
     pick_ref: Optional[np.ndarray],
@@ -333,6 +353,58 @@ def execute_pick_place_normal_object_sequence(
         place_seq = build_place_normal_object_sequence(place_ref, arm=arm)
         for act in place_seq:
             arx.step_smooth_eef(act)
+
+
+def execute_return_to_source_sequence(
+    arx,
+    pick_ref: Optional[np.ndarray],
+    arm: str,
+    item_type: str,
+) -> None:
+    """把当前抓着的物体按对应放置模板送回 pick 源位附近释放。"""
+    if pick_ref is None:
+        raise ValueError("pick_ref 为空")
+    if item_type == "cup":
+        execute_pick_place_cup_sequence(
+            arx=arx,
+            pick_ref=None,
+            place_ref=pick_ref,
+            arm=arm,
+            do_pick=False,
+            do_place=True,
+        )
+        return
+    if item_type == "straw":
+        execute_pick_place_straw_sequence(
+            arx=arx,
+            pick_ref=None,
+            place_ref=pick_ref,
+            arm=arm,
+            do_pick=False,
+            do_place=True,
+        )
+        return
+    if item_type == "deepbox":
+        execute_pick_place_deepbox_sequence(
+            arx=arx,
+            pick_ref=None,
+            place_ref=pick_ref,
+            arm=arm,
+            do_pick=False,
+            do_place=True,
+        )
+        return
+    if item_type == "normal object":
+        execute_pick_place_normal_object_sequence(
+            arx=arx,
+            pick_ref=None,
+            place_ref=pick_ref,
+            arm=arm,
+            do_pick=False,
+            do_place=True,
+        )
+        return
+    raise ValueError(f"unknown item_type: {item_type!r}")
 
 
 def execute_move_away(

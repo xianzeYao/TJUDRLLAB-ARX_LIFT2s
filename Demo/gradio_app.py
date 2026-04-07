@@ -37,6 +37,10 @@ DEFAULT_NAV_VOTE_TIMES = 3
 DEFAULT_NAV_LOCAL_DEBUG = True
 # Whether nav dual sweep keeps the original local swap debug flow enabled.
 DEFAULT_SWAP_LOCAL_DEBUG = True
+# Fixed stop distance used by nav dual sweep from the Gradio wrapper.
+DEFAULT_NAV_DISTANCE = 0.55
+# Fixed lift height used before nav dual sweep navigation.
+DEFAULT_NAV_LIFT_HEIGHT = 0.0
 
 # Whether smart shelf search allows navigation rotate-recover behavior.
 DEFAULT_SHELF_ROTATE_RECOVER = True
@@ -46,13 +50,15 @@ DEFAULT_SHELF_DEPTH_MEDIAN_N = 10
 DEFAULT_SHELF_NAV_DEBUG = True
 # Whether smart shelf search keeps the original local pick/place debug flow enabled.
 DEFAULT_SHELF_PICK_DEBUG = True
+# Fixed first navigation lift height used by smart shelf search from the Gradio wrapper.
+DEFAULT_SHELF_FIRST_NAV_HEIGHT = 14.5
 
 # Camera polling interval for refreshing the three live camera feeds.
-CAMERA_POLL_INTERVAL_S = 0.08
+CAMERA_POLL_INTERVAL_S = 0.05
 # Sleep interval while waiting for the ARX environment before camera polling starts.
 CAMERA_IDLE_SLEEP_S = 0.10
 # Gradio UI timer interval for pulling the latest controller state.
-UI_REFRESH_INTERVAL_S = 0.12
+UI_REFRESH_INTERVAL_S = 0.05
 
 
 def _serialize_json(value: Any) -> Any:
@@ -122,7 +128,8 @@ class DemoController:
         self._stop_task = threading.Event()
         self._camera_error_logged = False
         self._task_running = False
-        self._task_queue: queue.Queue[Optional[Callable[[], None]]] = queue.Queue()
+        self._task_queue: queue.Queue[Optional[Callable[[], None]]] = queue.Queue(
+        )
         self._task_worker_thread = threading.Thread(
             target=self._task_worker_loop,
             name="gradio-task-worker",
@@ -298,8 +305,6 @@ class DemoController:
     def start_nav_dual_sweep(
         self,
         prompt: str,
-        distance: float,
-        nav_lift_height: float,
     ) -> str:
         if not prompt.strip():
             return "Prompt is required."
@@ -326,8 +331,8 @@ class DemoController:
                 nav_dual_sweep(
                     env,
                     goal=prompt.strip(),
-                    distance=float(distance),
-                    nav_lift_height=float(nav_lift_height),
+                    distance=DEFAULT_NAV_DISTANCE,
+                    nav_lift_height=DEFAULT_NAV_LIFT_HEIGHT,
                     nav_debug_raw=DEFAULT_NAV_LOCAL_DEBUG,
                     swap_debug_raw=DEFAULT_SWAP_LOCAL_DEBUG,
                     nav_depth_median_n=DEFAULT_NAV_DEPTH_MEDIAN_N,
@@ -372,7 +377,6 @@ class DemoController:
     def start_smart_shelf_search(
         self,
         request: str,
-        first_nav_height: float,
     ) -> str:
         if not request.strip():
             return "Request is required."
@@ -399,7 +403,7 @@ class DemoController:
                 result = smart_shelf_search_from_request(
                     arx=env,
                     request=request.strip(),
-                    first_nav_height=float(first_nav_height),
+                    first_nav_height=DEFAULT_SHELF_FIRST_NAV_HEIGHT,
                     rotate_recover=DEFAULT_SHELF_ROTATE_RECOVER,
                     nav_debug=DEFAULT_SHELF_NAV_DEBUG,
                     debug_pick_place=DEFAULT_SHELF_PICK_DEBUG,
@@ -482,21 +486,11 @@ class DemoController:
         with self._lock:
             state = self._state
             frames = dict(state.frames)
-            telemetry = dict(state.telemetry)
-            result = state.result
-            logs = list(state.logs)
-
-        if result is not None:
-            telemetry = dict(telemetry)
-            telemetry["result"] = result
 
         return (
-            self._summarize_status(),
             _to_display_image(frames.get("camera_l_color")),
             _to_display_image(frames.get("camera_h_color")),
             _to_display_image(frames.get("camera_r_color")),
-            "\n".join(logs[-80:]),
-            _dump_json(telemetry or {}),
         )
 
 
@@ -513,89 +507,52 @@ def _require_gradio():
 def build_app(controller: DemoController):
     gr = _require_gradio()
 
-    with gr.Blocks(title="ARX Demo Console") as demo:
-        gr.Markdown(
-            "# ARX Demo Console\n"
-            "Three camera feeds stay live. Task debug stays in the original "
-            "terminal and local OpenCV windows."
-        )
+    with gr.Blocks(title="TJUDRLLAB---泛化移动操控") as demo:
+        gr.Markdown("# TJUDRLLAB---泛化移动操控")
 
-        action_feedback = gr.Textbox(
-            label="Action Feedback",
-            interactive=False,
-            lines=1,
-        )
-        status_md = gr.Markdown()
+        with gr.Tabs():
+            with gr.Tab("扫地"):
+                nav_prompt = gr.Textbox(
+                    label="Prompt",
+                    value="扫地",
+                )
+                start_nav_btn = gr.Button(
+                    "开始任务", variant="primary")
+
+            with gr.Tab("货架取物"):
+                shelf_request = gr.Textbox(
+                    label="Prompt",
+                    value="拿一个网球",
+                )
+                start_shelf_btn = gr.Button(
+                    "开始任务",
+                    variant="primary",
+                )
+
+        with gr.Row():
+            stop_btn = gr.Button("结束任务", variant="stop")
 
         with gr.Row():
             cam_l = gr.Image(label="camera_l", interactive=False)
             cam_h = gr.Image(label="camera_h", interactive=False)
             cam_r = gr.Image(label="camera_r", interactive=False)
 
-        with gr.Tabs():
-            with gr.Tab("Nav Dual Sweep"):
-                nav_prompt = gr.Textbox(
-                    label="Prompt",
-                    value="paper cup or paper ball or bottle on the floor",
-                )
-                with gr.Accordion("Advanced", open=False):
-                    nav_distance = gr.Number(label="Stop Distance", value=0.525)
-                    nav_lift_height = gr.Number(
-                        label="Nav Lift Height", value=0.0)
-                start_nav_btn = gr.Button(
-                    "Start Nav Dual Sweep", variant="primary")
-
-            with gr.Tab("Smart Shelf Search"):
-                shelf_request = gr.Textbox(
-                    label="Request",
-                    value="我要一个蓝色盒子",
-                )
-                with gr.Accordion("Advanced", open=False):
-                    first_nav_height = gr.Number(
-                        label="First Nav Height",
-                        value=14.5,
-                    )
-                start_shelf_btn = gr.Button(
-                    "Start Smart Shelf Search",
-                    variant="primary",
-                )
-
-        with gr.Row():
-            log_box = gr.Textbox(
-                label="Runtime Log",
-                lines=12,
-                interactive=False,
-            )
-            telemetry_box = gr.Textbox(
-                label="Runtime Telemetry",
-                lines=12,
-                interactive=False,
-            )
-
-        stop_btn = gr.Button("Stop Current Task", variant="stop")
-
         start_nav_btn.click(
             fn=controller.start_nav_dual_sweep,
             inputs=[
                 nav_prompt,
-                nav_distance,
-                nav_lift_height,
             ],
-            outputs=[action_feedback],
             queue=False,
         )
         start_shelf_btn.click(
             fn=controller.start_smart_shelf_search,
             inputs=[
                 shelf_request,
-                first_nav_height,
             ],
-            outputs=[action_feedback],
             queue=False,
         )
         stop_btn.click(
             fn=controller.stop_current_task,
-            outputs=[action_feedback],
             queue=False,
         )
 
@@ -603,12 +560,9 @@ def build_app(controller: DemoController):
         timer.tick(
             fn=controller.read_ui_state,
             outputs=[
-                status_md,
                 cam_l,
                 cam_h,
                 cam_r,
-                log_box,
-                telemetry_box,
             ],
             queue=False,
         )

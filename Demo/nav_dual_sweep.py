@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 from visualize_utils import (
     VisualizeContext,
+    emit_event,
     emit_log,
     emit_result,
     emit_stage,
@@ -13,6 +14,7 @@ from visualize_utils import (
     restore_keyboard,
     should_stop,
 )
+from sweep_prompt_parser import parse_human_sweep_request
 
 sys.path.append("../ARX_Realenv/ROS2")  # noqa
 
@@ -33,6 +35,8 @@ def nav_dual_sweep(
 ) -> None:
     old_settings = init_keyboard()
     cycle_idx = 0
+    sweep_plan = parse_human_sweep_request(goal)
+    goal_prompt = sweep_plan.goal_prompt
     quit_requested = False
     base_stop_checker = None if visualize is None else visualize.stop_checker
 
@@ -61,12 +65,35 @@ def nav_dual_sweep(
         return should_stop(task_visualize)
 
     try:
+        emit_event(
+            task_visualize,
+            "nav_dual_sweep_request",
+            source="nav_dual_sweep",
+            raw_request=sweep_plan.raw_request,
+            goal_prompt=sweep_plan.goal_prompt,
+            intent=sweep_plan.intent,
+            reason=sweep_plan.reason,
+            matched_alias=sweep_plan.matched_alias,
+        )
+        if sweep_plan.intent != "direct_prompt" or sweep_plan.raw_request != sweep_plan.goal_prompt:
+            resolution_message = (
+                "Resolved nav dual sweep request: "
+                f"{sweep_plan.raw_request} -> {sweep_plan.goal_prompt}"
+            )
+            print(resolution_message)
+            emit_log(
+                task_visualize,
+                source="nav_dual_sweep",
+                stage="request",
+                message=resolution_message,
+            )
         emit_stage(
             task_visualize,
             source="nav_dual_sweep",
             stage="start",
-            message=f"Start nav dual sweep for {goal}",
-            goal=goal,
+            message=f"Start nav dual sweep for {goal_prompt}",
+            goal=goal_prompt,
+            raw_request=sweep_plan.raw_request,
         )
         pick_tools(arx, visualize=task_visualize)
 
@@ -114,7 +141,7 @@ def nav_dual_sweep(
             )
             nav_result = nav_to_goal(
                 arx,
-                goal=goal,
+                goal=goal_prompt,
                 distance=distance,
                 lift_height=nav_lift_height,
                 offset=0.47,
@@ -167,7 +194,7 @@ def nav_dual_sweep(
             )
             swap_result: Optional[object] = dual_swap(
                 arx,
-                object_prompt=goal,
+                object_prompt=goal_prompt,
                 debug_raw=swap_debug_raw,
                 depth_median_n=swap_depth_median_n,
                 visualize=task_visualize,
@@ -176,7 +203,7 @@ def nav_dual_sweep(
             if swap_result is None:
                 if _should_stop():
                     print("Stop signal received.")
-                    emit_result(
+                    emit_result(    
                         task_visualize,
                         source="nav_dual_sweep",
                         status="stopped",
@@ -216,7 +243,7 @@ def main():
         nav_dual_sweep(
             arx,
             goal="paper cup or paper ball or bottle on the floor",
-            distance=0.525,
+            distance=0.55,
             nav_lift_height=0.0,
             nav_debug_raw=True,
             swap_debug_raw=True,
