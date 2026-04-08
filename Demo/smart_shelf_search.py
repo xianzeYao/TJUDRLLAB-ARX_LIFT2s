@@ -119,7 +119,20 @@ def _resolve_place_center_prompt(place_target_prompt: str) -> str:
 
 
 def _resolve_place_final_prompt(place_target_prompt: str) -> str:
-    return _resolve_place_center_prompt(place_target_prompt)
+    target = _strip_place_region_prefix(place_target_prompt)
+    if not target:
+        raise ValueError("place_target_prompt resolved to empty target")
+    if not target.lower().startswith("the "):
+        target = f"the {target}"
+    return (
+        f"Provide ONE 2D point for: {target}\n\n"
+        "Rules:\n"
+        '    Output JSON only: [{"point_2d":[x,y]}]\n'
+        "    x,y must be in [0,1000]\n"
+        "    The point MUST NOT be on any object inside or alreadt be placed on "
+        f"{target}\n"
+        "Return JSON only."
+    )
 
 
 def _get_place_lateral_offset_y(arm: str) -> float:
@@ -528,7 +541,8 @@ def smart_shelf_search(
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
-            place_prompt=resolved_place_prompt,
+            place_prompt=place_target_prompt,
+            place_all_prompt=resolved_place_prompt,
             arm_side=pick_arm,
             item_type="normal object",
             debug=debug_pick_place,

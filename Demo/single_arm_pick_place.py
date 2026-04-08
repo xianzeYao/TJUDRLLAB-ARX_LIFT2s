@@ -21,7 +21,7 @@ from point2pos_utils import (
 from task_completion_detector import (
     capture_hand_check_frame,
     capture_third_check_frame,
-    predict_third_person_target_check,
+    predict_third_person_delta_check,
     predict_wrist_target_check,
     run_task_completion_check,
 )
@@ -143,16 +143,18 @@ def _predict_pick_one_point(
 def _predict_place_one_point(
     color: np.ndarray,
     base_prompt: str,
+    all_prompt: str = "",
 ) -> Tuple[int, int]:
-    all_prompt = (
-        f"Provide ONE 2D point for: {base_prompt}\n\n"
-        "        Rules:\n"
-        '            Output JSON only: [{"point_2d":[x,y]}]\n'
-        "            x,y must be in [0,1000]\n"
-        "            The point MUST NOT be on any other object already inside or placed on the "
-        f" {base_prompt}\n"
-        "        Return JSON only."
-    )
+    if not all_prompt:
+        all_prompt = (
+            f"Provide ONE 2D point for: {base_prompt}\n\n"
+            "Rules:\n"
+            '    Output JSON only: [{"point_2d":[x,y]}]\n'
+            "    x,y must be in [0,1000]\n"
+            "    The point MUST NOT be on any object inside or be placed on "
+            f"{base_prompt}\n"
+            "Return JSON only."
+        )
     u, v = predict_point_from_rgb(
         color,
         text_prompt="",
@@ -197,6 +199,7 @@ def _single_arm_pick_place_once(
     arx: ARXRobotEnv,
     pick_prompt: str,
     place_prompt: str,
+    place_all_prompt: str = "",
     arm_side: Literal["left", "right", "fit"] = "left",
     debug: bool = True,
     depth_median_n: int = 10,
@@ -224,7 +227,11 @@ def _single_arm_pick_place_once(
             elif do_pick:
                 pick_px = _predict_pick_one_point(color, pick_prompt)
             else:
-                place_px = _predict_place_one_point(color, place_prompt)
+                place_px = _predict_place_one_point(
+                    color,
+                    place_prompt,
+                    all_prompt=place_all_prompt,
+                )
         except RuntimeError as exc:
             print(f"点位预测失败，自动刷新：{exc}")
             emit_log(
@@ -428,6 +435,7 @@ def single_arm_pick_place(
     arx: ARXRobotEnv,
     pick_prompt: str,
     place_prompt: str,
+    place_all_prompt: str = "",
     arm_side: Literal["left", "right", "fit"] = "fit",
     item_type: Literal["cup", "straw", "deepbox",
                        "normal object"] = "normal object",
@@ -483,6 +491,7 @@ def single_arm_pick_place(
                 arx=arx,
                 pick_prompt=pick_prompt,
                 place_prompt=place_prompt,
+                place_all_prompt=place_all_prompt,
                 arm_side=arm_side,
                 debug=debug,
                 depth_median_n=depth_median_n,
@@ -532,6 +541,26 @@ def single_arm_pick_place(
                         f"set_special_mode(1, side={previous_arm!r}) returned: {error_message}"
                     )
             previous_arm = arm
+            pre_pick_third_image = None
+            pre_pick_third_camera_key = None
+            if completion_check_mode == "plus" and do_pick:
+                try:
+                    pre_pick_third_image, pre_pick_third_camera_key = capture_third_check_frame(
+                        arx=arx,
+                        third_camera_view=completion_third_camera_view,
+                        settle_s=0.0,
+                        max_retries=completion_capture_retries,
+                        retry_sleep_s=completion_capture_retry_sleep_s,
+                    )
+                except Exception as exc:
+                    print(f"pick 前第三视角采图失败，跳过自动重试: {exc}")
+                    emit_log(
+                        visualize,
+                        source="single_arm_pick_place",
+                        stage="completion_check",
+                        message=f"pick 前第三视角采图失败，跳过自动重试: {exc}",
+                    )
+                    return last_result
 
             try:
                 if do_pick:
@@ -682,15 +711,18 @@ def single_arm_pick_place(
                     )
                 try:
                     third_start = time.time()
-                    third_image, third_camera_key = capture_third_check_frame(
+                    after_pick_third_image, third_camera_key = capture_third_check_frame(
                         arx=arx,
                         third_camera_view=completion_third_camera_view,
                         settle_s=completion_settle_s,
                         max_retries=completion_capture_retries,
                         retry_sleep_s=completion_capture_retry_sleep_s,
                     )
-                    third_result = predict_third_person_target_check(
-                        third_image=third_image,
+                    if pre_pick_third_image is None:
+                        raise RuntimeError("missing pre-pick third-person frame")
+                    third_result = predict_third_person_delta_check(
+                        before_image=pre_pick_third_image,
+                        after_image=after_pick_third_image,
                         pick_prompt=pick_prompt,
                     )
                 except Exception as exc:
@@ -724,6 +756,7 @@ def single_arm_pick_place(
                     third_status=third_result.status,
                     elapsed_s=third_elapsed_s,
                     arm=arm,
+                    pre_pick_third_camera_key=pre_pick_third_camera_key,
                     third_camera_key=third_camera_key,
                     actual_gripper=actual_gripper,
                     close_target=close_target,
@@ -743,7 +776,7 @@ def single_arm_pick_place(
                         source="single_arm_pick_place",
                         stage="completion_check",
                         message=(
-                            "腕部检测失败，但第三视角未见目标，"
+                            "腕部检测失败，但第三视角前后对比显示少了一个目标，"
                             "按成功继续执行"
                         ),
                     )
@@ -793,11 +826,11 @@ def single_arm_pick_place(
                     visualize,
                     source="single_arm_pick_place",
                     stage="completion_check",
-                    message=(
-                        "腕部检测失败，且第三视角仍见目标，"
-                        "已放回源位并复位，准备重试"
-                    ),
-                )
+                        message=(
+                            "腕部检测失败，且第三视角前后对比未见少一个目标，"
+                            "已放回源位并复位，准备重试"
+                        ),
+                    )
                 if retry_limit is not None and retry_idx >= retry_limit:
                     print(
                         "[pick_place][plus] retry limit reached after return-to-source branch"

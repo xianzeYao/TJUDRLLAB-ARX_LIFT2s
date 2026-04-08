@@ -233,6 +233,21 @@ def _build_third_person_check_prompt(
     return "\n".join(lines)
 
 
+def _build_third_person_delta_check_prompt(
+    *,
+    pick_prompt: str,
+) -> str:
+    lines = [
+        "Image 1 is before pick. Image 2 is after pick.",
+        f"Is one {pick_prompt} missing in image 2 compared with image 1?",
+        "Return only valid JSON with keys:",
+        '- "status": one of "success", "fail"',
+        '- "description": short evidence-based explanation',
+        f'Use status=success only when image 2 clearly has one fewer {pick_prompt} than image 1.',
+    ]
+    return "\n".join(lines)
+
+
 def _build_wrist_check_prompt(
     *,
     pick_prompt: str,
@@ -339,6 +354,54 @@ def predict_third_person_target_check(
             ("target", repr(pick_prompt)),
             ("result", result.status),
             ("rule", "不在第三视角里才算success"),
+            ("desc", result.description),
+        ],
+    )
+    return result
+
+
+def predict_third_person_delta_check(
+    *,
+    before_image: np.ndarray,
+    after_image: np.ndarray,
+    pick_prompt: str,
+    base_url: str = "http://172.28.102.11:22002/v1",
+    model_name: str = "Embodied-R1.5-SFT-0128",
+    api_key: str = "EMPTY",
+    temperature: float = 0.0,
+    top_p: float = 0.8,
+    seed: int = 3407,
+    max_tokens: int = 256,
+) -> TaskCheckResult:
+    prompt = _build_third_person_delta_check_prompt(
+        pick_prompt=pick_prompt,
+    )
+    _, raw = predict_multi_points_from_multi_image(
+        images=[before_image, after_image],
+        text_prompt="",
+        all_prompt=prompt,
+        base_url=base_url,
+        model_name=model_name,
+        api_key=api_key,
+        assume_bgr=(False, False),
+        temperature=temperature,
+        top_p=top_p,
+        seed=seed,
+        max_tokens=max_tokens,
+        return_raw=True,
+    )
+    raw = raw or ""
+    parsed = _decode_json_result(raw)
+    result = TaskCheckResult(
+        status=str(parsed["status"]),
+        description=str(parsed["description"]),
+    )
+    _print_decision(
+        "[task_check][第三视角对比]",
+        [
+            ("target", repr(pick_prompt)),
+            ("result", result.status),
+            ("rule", "第二张比第一张少一个目标才算success"),
             ("desc", result.description),
         ],
     )
