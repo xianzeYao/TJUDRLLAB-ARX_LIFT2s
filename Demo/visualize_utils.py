@@ -279,7 +279,13 @@ def dispatch_debug_image(
     window_name: str,
     **payload: Any,
 ) -> Literal[True, False, None]:
-    del source, panel, payload
+    emit_debug_image(
+        visualize,
+        source=source,
+        panel=panel,
+        image=image,
+        **payload,
+    )
     stop_checker = None if visualize is None else visualize.stop_checker
     return confirm_debug_image(
         image,

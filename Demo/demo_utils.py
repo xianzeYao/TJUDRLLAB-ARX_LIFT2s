@@ -32,6 +32,10 @@ from motion_pick_place_straw import (
     build_pick_straw_sequence,
     build_place_straw_sequence,
 )
+from motion_pick_place_hug import (
+    build_pick_hug_sequence,
+    build_place_hug_sequence,
+)
 from motion_move_away import build_move_away_sequence
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -353,6 +357,34 @@ def execute_pick_place_normal_object_sequence(
         if place_ref is None:
             raise ValueError("place_ref 为空")
         place_seq = build_place_normal_object_sequence(place_ref, arm=arm)
+        for act in place_seq:
+            arx.step_smooth_eef(act)
+
+
+def execute_pick_place_hug_sequence(
+    arx,
+    left_ref: Optional[np.ndarray],
+    right_ref: Optional[np.ndarray],
+    do_pick: bool = True,
+    do_place: bool = False,
+) -> None:
+    """执行 hug 抓取/放置动作序列。
+    注意pick 和 place 不能同时执行。
+    """
+    if do_pick:
+        if left_ref is None:
+            raise ValueError("left_ref 为空")
+        if right_ref is None:
+            raise ValueError("right_ref 为空")
+        pick_seq = build_pick_hug_sequence(left_ref=left_ref, right_ref=right_ref)
+        for act in pick_seq:
+            arx.step_smooth_eef(act)
+    if do_place:
+        if left_ref is None:
+            raise ValueError("left_ref 为空")
+        if right_ref is None:
+            raise ValueError("right_ref 为空")
+        place_seq = build_place_hug_sequence(left_ref=left_ref, right_ref=right_ref)
         for act in place_seq:
             arx.step_smooth_eef(act)
 

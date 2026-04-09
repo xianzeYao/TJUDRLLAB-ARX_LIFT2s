@@ -23,7 +23,6 @@ from task_completion_detector import (
 from visualize_utils import (
     VisualizeContext,
     dispatch_debug_image,
-    emit_event,
     render_pick_place_debug_view,
     should_stop,
 )
@@ -487,27 +486,6 @@ def single_arm_pick_place(
                 print(f"任务检测失败，跳过自动重试: {exc}")
                 return last_result
             check_elapsed_s = time.time() - check_start
-
-            emit_event(
-                visualize,
-                "completion_check",
-                source="single_arm_pick_place",
-                mode=completion_check_mode,
-                status=check_result.status,
-                description=check_result.description,
-                third_description=check_result.third_description,
-                wrist_description=check_result.wrist_description,
-                third_status=check_result.third_status,
-                wrist_status=check_result.wrist_status,
-                elapsed_s=check_elapsed_s,
-                arm=arm,
-                next_action=check_result.next_action,
-                actual_gripper=check_result.actual_gripper,
-                close_target=check_result.close_target,
-                hand_camera_key=check_result.hand_camera_key,
-                third_camera_key=check_result.third_camera_key,
-                pre_pick_third_camera_key=check_result.pre_pick_third_camera_key,
-            )
 
             if check_result.status == "success":
                 return _finish_pick_place_success(
