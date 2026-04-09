@@ -18,8 +18,6 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
 
-VisualEventHandler = Callable[[str, dict[str, Any]], None]
-
 _PIL_FONT_CACHE: dict[int, Optional[Any]] = {}
 _FONT_CANDIDATE_PATHS = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -163,9 +161,7 @@ def _draw_debug_panel_pil(
 
 @dataclass
 class VisualizeContext:
-    on_event: Optional[VisualEventHandler] = None
     stop_checker: Optional[Callable[[], bool]] = None
-    page_debug: bool = False
 
 
 def _draw_debug_panel(
@@ -181,93 +177,6 @@ def _draw_debug_panel(
         _draw_debug_panel_pil(image, lines, origin=origin, font=font)
         return
     _draw_debug_panel_cv2(image, lines, origin=origin)
-
-
-def emit_event(
-    visualize: Optional[VisualizeContext],
-    event: str,
-    **payload: Any,
-) -> None:
-    if visualize is None or visualize.on_event is None:
-        return
-    try:
-        visualize.on_event(event, payload)
-    except Exception as exc:
-        print(f"[visualize_utils] event handler failed for {event!r}: {exc}")
-
-
-def emit_log(
-    visualize: Optional[VisualizeContext],
-    *,
-    source: str,
-    message: str,
-    stage: Optional[str] = None,
-    **payload: Any,
-) -> None:
-    emit_event(
-        visualize,
-        "log",
-        source=source,
-        stage=stage,
-        message=message,
-        **payload,
-    )
-
-
-def emit_stage(
-    visualize: Optional[VisualizeContext],
-    *,
-    source: str,
-    stage: str,
-    message: str,
-    **payload: Any,
-) -> None:
-    emit_event(
-        visualize,
-        "stage",
-        source=source,
-        stage=stage,
-        message=message,
-        **payload,
-    )
-
-
-def emit_result(
-    visualize: Optional[VisualizeContext],
-    *,
-    source: str,
-    status: str,
-    message: Optional[str] = None,
-    **payload: Any,
-) -> None:
-    emit_event(
-        visualize,
-        "result",
-        source=source,
-        status=status,
-        message=message,
-        **payload,
-    )
-
-
-def emit_debug_image(
-    visualize: Optional[VisualizeContext],
-    *,
-    source: str,
-    panel: str,
-    image: np.ndarray,
-    **payload: Any,
-) -> None:
-    if visualize is None or not visualize.page_debug:
-        return
-    emit_event(
-        visualize,
-        "debug",
-        source=source,
-        panel=panel,
-        image=image,
-        **payload,
-    )
 
 
 def should_stop(visualize: Optional[VisualizeContext]) -> bool:
@@ -370,13 +279,7 @@ def dispatch_debug_image(
     window_name: str,
     **payload: Any,
 ) -> Literal[True, False, None]:
-    emit_debug_image(
-        visualize,
-        source=source,
-        panel=panel,
-        image=image,
-        **payload,
-    )
+    del source, panel, payload
     stop_checker = None if visualize is None else visualize.stop_checker
     return confirm_debug_image(
         image,
@@ -463,6 +366,36 @@ def render_pick_place_debug_view(
         cv2.circle(vis, place_px, 3, (255, 0, 0), -1)
         cv2.circle(vis, place_px, 10, (255, 255, 255), 2)
         lines.append(f"Place: {place_prompt}")
+    lines.append("E: accept  R: refresh  Q: quit")
+    _draw_debug_panel(vis, lines)
+    return vis
+
+
+def render_multi_points_debug_view(
+    color: np.ndarray,
+    *,
+    points: list[tuple[int, int]],
+    title: Optional[str] = None,
+) -> np.ndarray:
+    vis = color.copy()
+    for idx, point in enumerate(points, start=1):
+        cv2.circle(vis, point, 3, (0, 0, 255), -1)
+        cv2.circle(vis, point, 10, (255, 255, 255), 2)
+        cv2.putText(
+            vis,
+            str(idx),
+            (point[0] + 6, point[1] - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+    lines = []
+    if title:
+        lines.append(title)
+    lines.append(f"Points: {len(points)}")
     lines.append("E: accept  R: refresh  Q: quit")
     _draw_debug_panel(vis, lines)
     return vis

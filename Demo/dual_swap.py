@@ -23,10 +23,6 @@ from point2pos_utils import (
 from visualize_utils import (
     VisualizeContext,
     dispatch_debug_image,
-    emit_event,
-    emit_log,
-    emit_result,
-    emit_stage,
     init_keyboard,
     render_dual_swap_debug_view,
     restore_keyboard,
@@ -264,18 +260,13 @@ def pick_tools(
     arx: ARXRobotEnv,
     visualize: Optional[VisualizeContext] = None,
 ) -> None:
+    del visualize
     open_action = {
         "left": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
         "right": np.array([0.05, 0, 0, 0, 0, 0, -3.4], dtype=np.float32),
     }
     arx.step_smooth_eef(open_action)
     print("请放取扫把簸箕，5秒后开始夹取...")
-    emit_log(
-        visualize,
-        source="dual_swap",
-        stage="pick_tools",
-        message="请放取扫把簸箕，5秒后开始夹取...",
-    )
     time.sleep(5.0)
 
     close_action = {
@@ -297,15 +288,10 @@ def release_tools(
     arx: ARXRobotEnv,
     visualize: Optional[VisualizeContext] = None,
 ) -> None:
+    del visualize
     success, error_message = arx.set_special_mode(1)
     if not success:
         raise RuntimeError(f"Failed to home both arms: {error_message}")
-    emit_log(
-        visualize,
-        source="dual_swap",
-        stage="release_tools",
-        message="Release sweep tools and home both arms.",
-    )
     time.sleep(1.0)
 
     open_action = {
@@ -340,39 +326,15 @@ def _detect_swap_target(
         )
         if trash_base_point is None:
             print(f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新")
-            emit_log(
-                visualize,
-                source="dual_swap",
-                stage="detect_target",
-                message=f"预测像素 {(u, v)} 深度无效或像素越界，自动刷新",
-            )
             continue
 
         if not debug_raw:
-            emit_event(
-                visualize,
-                "swap_target",
-                source="dual_swap",
-                object_prompt=object_prompt,
-                pixel=(u, v),
-                target_base_point=np.asarray(
-                    trash_base_point, dtype=np.float32).tolist(),
-            )
             return trash_base_point
 
         vis = render_dual_swap_debug_view(
             color,
             (u, v),
             object_prompt=object_prompt,
-        )
-        emit_event(
-            visualize,
-            "swap_target",
-            source="dual_swap",
-            object_prompt=object_prompt,
-            pixel=(u, v),
-            target_base_point=np.asarray(
-                trash_base_point, dtype=np.float32).tolist(),
         )
         debug_result = dispatch_debug_image(
             visualize,
@@ -401,13 +363,6 @@ def dual_swap(
 ) -> Optional[np.ndarray]:
     old_settings = init_keyboard()
     try:
-        emit_stage(
-            visualize,
-            source="dual_swap",
-            stage="start",
-            message=f"Start dual sweep for {object_prompt}",
-            object_prompt=object_prompt,
-        )
         target_base_point = _detect_swap_target(
             arx,
             object_prompt=object_prompt,
@@ -416,13 +371,6 @@ def dual_swap(
             visualize=visualize,
         )
         if target_base_point is None:
-            emit_result(
-                visualize,
-                source="dual_swap",
-                status="canceled",
-                message="dual sweep canceled",
-                object_prompt=object_prompt,
-            )
             return None
 
         swap_seq = build_swap_sequence(target_base_point)
@@ -437,33 +385,11 @@ def dual_swap(
         consecutive_dustpan_gain_count = 0
         for sweep_idx in range(max_sweeps):
             if should_stop(visualize):
-                emit_result(
-                    visualize,
-                    source="dual_swap",
-                    status="stopped",
-                    message="dual sweep stopped",
-                    object_prompt=object_prompt,
-                )
                 return None
             start = sweep_idx * actions_per_sweep
             end = start + actions_per_sweep
-            emit_stage(
-                visualize,
-                source="dual_swap",
-                stage="sweep",
-                message=f"Execute sweep {sweep_idx + 1}/{max_sweeps}",
-                sweep_index=sweep_idx + 1,
-                sweep_total=max_sweeps,
-            )
             for action in sweep_actions[start:end]:
                 if should_stop(visualize):
-                    emit_result(
-                        visualize,
-                        source="dual_swap",
-                        status="stopped",
-                        message="dual sweep stopped",
-                        object_prompt=object_prompt,
-                    )
                     return None
                 arx.step_smooth_eef(action)
             if sweep_idx == max_sweeps - 1:
@@ -481,15 +407,6 @@ def dual_swap(
                     f"[auto-judge] failed after sweep {sweep_idx + 1}: {exc}. "
                     "Continue sweep conservatively."
                 )
-                emit_log(
-                    visualize,
-                    source="dual_swap",
-                    stage="judge",
-                    message=(
-                        f"[auto-judge] failed after sweep {sweep_idx + 1}: "
-                        f"{exc}. Continue sweep conservatively."
-                    ),
-                )
                 continue
             print(
                 f"[auto-judge] sweep {sweep_idx + 1}/{max_sweeps}: "
@@ -497,17 +414,6 @@ def dual_swap(
                 f"dustpan_gained_target={judge_result.dustpan_gained_target}, "
                 f"continue={judge_result.continue_sweep}, "
                 f"reason={judge_result.reason}"
-            )
-            emit_event(
-                visualize,
-                "judge_result",
-                source="dual_swap",
-                sweep_index=sweep_idx + 1,
-                sweep_total=max_sweeps,
-                floor_has_target=judge_result.floor_has_target,
-                dustpan_gained_target=judge_result.dustpan_gained_target,
-                continue_sweep=judge_result.continue_sweep,
-                reason=judge_result.reason,
             )
             if judge_result.dustpan_gained_target:
                 consecutive_dustpan_gain_count += 1
@@ -527,15 +433,6 @@ def dual_swap(
                     "[auto-judge] dustpan gained target once, "
                     "wait for one more confirmation before retracting."
                 )
-        emit_result(
-            visualize,
-            source="dual_swap",
-            status="success",
-            message="dual sweep completed",
-            object_prompt=object_prompt,
-            target_base_point=np.asarray(
-                target_base_point, dtype=np.float32).tolist(),
-        )
         return target_base_point
     finally:
         cv2.destroyAllWindows()

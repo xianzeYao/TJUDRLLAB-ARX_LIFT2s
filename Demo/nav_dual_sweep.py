@@ -5,10 +5,6 @@ from typing import Optional
 import numpy as np
 from visualize_utils import (
     VisualizeContext,
-    emit_event,
-    emit_log,
-    emit_result,
-    emit_stage,
     get_key_nonblock,
     init_keyboard,
     restore_keyboard,
@@ -56,89 +52,35 @@ def nav_dual_sweep(
         return False
 
     task_visualize = VisualizeContext(
-        on_event=None if visualize is None else visualize.on_event,
         stop_checker=_stop_checker,
-        page_debug=False if visualize is None else visualize.page_debug,
     )
 
     def _should_stop() -> bool:
         return should_stop(task_visualize)
 
     try:
-        emit_event(
-            task_visualize,
-            "nav_dual_sweep_request",
-            source="nav_dual_sweep",
-            raw_request=sweep_plan.raw_request,
-            goal_prompt=sweep_plan.goal_prompt,
-            intent=sweep_plan.intent,
-            reason=sweep_plan.reason,
-            matched_alias=sweep_plan.matched_alias,
-        )
         if sweep_plan.intent != "direct_prompt" or sweep_plan.raw_request != sweep_plan.goal_prompt:
             resolution_message = (
                 "Resolved nav dual sweep request: "
                 f"{sweep_plan.raw_request} -> {sweep_plan.goal_prompt}"
             )
             print(resolution_message)
-            emit_log(
-                task_visualize,
-                source="nav_dual_sweep",
-                stage="request",
-                message=resolution_message,
-            )
-        emit_stage(
-            task_visualize,
-            source="nav_dual_sweep",
-            stage="start",
-            message=f"Start nav dual sweep for {goal_prompt}",
-            goal=goal_prompt,
-            raw_request=sweep_plan.raw_request,
-        )
         pick_tools(arx, visualize=task_visualize)
 
         while True:
             cycle_idx += 1
-            emit_stage(
-                task_visualize,
-                source="nav_dual_sweep",
-                stage="cycle",
-                message=f"Start sweep cycle {cycle_idx}",
-                cycle_index=cycle_idx,
-            )
             if _should_stop():
                 print("Stop signal received.")
-                emit_result(
-                    task_visualize,
-                    source="nav_dual_sweep",
-                    status="stopped",
-                    message="nav dual sweep stopped",
-                    cycle_index=cycle_idx,
-                )
                 return
 
             if _should_stop():
                 print("Stop signal received.")
-                emit_result(
-                    task_visualize,
-                    source="nav_dual_sweep",
-                    status="stopped",
-                    message="nav dual sweep stopped",
-                    cycle_index=cycle_idx,
-                )
                 return
             lift_action = {
                 "left": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
                 "right": np.array([0.05, 0, 0.1, 0, 0, 0, 0.0], dtype=np.float32),
             }
             arx.step_smooth_eef(lift_action)
-            emit_stage(
-                task_visualize,
-                source="nav_dual_sweep",
-                stage="nav",
-                message=f"Cycle {cycle_idx}: navigate to target",
-                cycle_index=cycle_idx,
-            )
             nav_result = nav_to_goal(
                 arx,
                 goal=goal_prompt,
@@ -156,42 +98,14 @@ def nav_dual_sweep(
             if nav_result is None:
                 if _should_stop():
                     print("Stop signal received.")
-                    emit_result(
-                        task_visualize,
-                        source="nav_dual_sweep",
-                        status="stopped",
-                        message="nav dual sweep stopped",
-                        cycle_index=cycle_idx,
-                    )
                     return
                 print("nav_to_goal failed, retry next cycle")
-                emit_log(
-                    task_visualize,
-                    source="nav_dual_sweep",
-                    stage="nav",
-                    message="nav_to_goal failed, retry next cycle",
-                    cycle_index=cycle_idx,
-                )
                 continue
 
             if _should_stop():
                 print("Stop signal received.")
-                emit_result(
-                    task_visualize,
-                    source="nav_dual_sweep",
-                    status="stopped",
-                    message="nav dual sweep stopped",
-                    cycle_index=cycle_idx,
-                )
                 return
             arx.step_lift(0.0)
-            emit_stage(
-                task_visualize,
-                source="nav_dual_sweep",
-                stage="swap",
-                message=f"Cycle {cycle_idx}: execute dual sweep",
-                cycle_index=cycle_idx,
-            )
             swap_result: Optional[object] = dual_swap(
                 arx,
                 object_prompt=goal_prompt,
@@ -203,22 +117,8 @@ def nav_dual_sweep(
             if swap_result is None:
                 if _should_stop():
                     print("Stop signal received.")
-                    emit_result(    
-                        task_visualize,
-                        source="nav_dual_sweep",
-                        status="stopped",
-                        message="nav dual sweep stopped",
-                        cycle_index=cycle_idx,
-                    )
                     return
                 print("dual_swap failed, retry next cycle")
-                emit_log(
-                    task_visualize,
-                    source="nav_dual_sweep",
-                    stage="swap",
-                    message="dual_swap failed, retry next cycle",
-                    cycle_index=cycle_idx,
-                )
                 continue
     finally:
         arx.step_lift(0.0)

@@ -27,8 +27,6 @@ from point2pos_utils import get_aligned_frames, pixel_to_ref_point_safe  # noqa:
 from visualize_utils import (  # noqa: E402
     VisualizeContext,
     dispatch_debug_image,
-    emit_event,
-    emit_log,
     render_move_away_debug_view,
     should_stop,
 )
@@ -266,15 +264,6 @@ def move_away(
                 f"blocked={check_result.blocked}, "
                 f"description={check_result.description!r}"
             )
-            emit_log(
-                visualize,
-                source="move_away",
-                stage="detect",
-                message=(
-                    f"blocked={check_result.blocked}, "
-                    f"description={check_result.description!r}"
-                ),
-            )
             if not check_result.blocked:
                 return MoveAwayRunResult(
                     blocked=False,
@@ -290,12 +279,6 @@ def move_away(
                 )
             except Exception as exc:
                 print(f"[move_away] blocker point prediction failed: {exc}")
-                emit_log(
-                    visualize,
-                    source="move_away",
-                    stage="detect",
-                    message=f"blocker point prediction failed: {exc}",
-                )
                 continue
 
             arm = _select_arm_from_pixel(blocker_pixel, color.shape[1])
@@ -309,28 +292,8 @@ def move_away(
                     "[move_away] invalid depth for blocker pixel "
                     f"{blocker_pixel}, retry"
                 )
-                emit_log(
-                    visualize,
-                    source="move_away",
-                    stage="detect",
-                    message=(
-                        "invalid depth for blocker pixel "
-                        f"{blocker_pixel}, retry"
-                    ),
-                )
                 continue
 
-            emit_event(
-                visualize,
-                "move_away_plan",
-                source="move_away",
-                blocked=check_result.blocked,
-                description=check_result.description,
-                arm=arm,
-                blocker_pixel=blocker_pixel,
-                blocker_ref_point=np.asarray(
-                    blocker_ref_point, dtype=np.float32).tolist(),
-            )
             if debug_raw:
                 debug_image = render_move_away_debug_view(
                     color,

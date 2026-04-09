@@ -7,6 +7,7 @@ GRIPPER_OFFSET = 0.14
 GRIPPER_NORMAL_OBJECT = -0.025
 Z_NORMAL_OBJECT = 0.17
 PITCH_NORMAL_OBJECT = 0.4
+PITCH_NORMAL_OBJECT_LEFT = 0.41
 CALIBRATE_OFFSET_LEFT = 0.015
 CALIBRATE_OFFSET_RIGHT = 0.01
 
@@ -27,17 +28,26 @@ def _get_calibrate_offset(arm: str) -> float:
     raise ValueError(f"arm must be 'left' or 'right', got: {arm!r}")
 
 
+def _get_pitch_normal_object(arm: str) -> float:
+    if arm == "left":
+        return PITCH_NORMAL_OBJECT_LEFT
+    if arm == "right":
+        return PITCH_NORMAL_OBJECT
+    raise ValueError(f"arm must be 'left' or 'right', got: {arm!r}")
+
+
 def make_pick_move_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.ndarray]:
     """张开夹爪偏移到目标附近，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET - 0.03,
             base[1] + calibrate_offset,
             base[2] + 0.075,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             OPEN,
         ],
@@ -50,13 +60,14 @@ def make_pick_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str,
     """执行向前移动，准备鲁棒夹取位置，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
             base[2] + 0.07,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             OPEN,
         ],
@@ -69,13 +80,14 @@ def make_close_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nd
     """执行夹紧动作，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET + 0.035,
             base[1] + calibrate_offset,
             base[2] + 0.06,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -88,13 +100,14 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
     """回撤一点抓回位置，抬高保证一个重力对抗，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET - 0.045,
             base[1] + calibrate_offset,
             base[2] + 0.075,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -106,13 +119,14 @@ def make_pick_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, n
 def make_pick_back_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.ndarray]:
     """夹住回到初始位置，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             (base[0] - GRIPPER_OFFSET-0.08) / 5-0.05,
             0,
             (base[2] + 0.05) / 2 + 0.065,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -125,13 +139,14 @@ def make_place_move_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
     """保持抓取偏移到放置目标附近，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET - 0.05,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT+0.07,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -144,13 +159,14 @@ def make_place_robust_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str
     """执行向前移动，准备鲁棒放置位置。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT+0.07,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -163,13 +179,14 @@ def make_down_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
     """下降到放置位置，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT - 0.06,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             GRIPPER_NORMAL_OBJECT,
         ],
@@ -182,13 +199,14 @@ def make_open_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, np.nda
     """夹爪张开放置"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET-0.015,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT - 0.06,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             OPEN,
         ],
@@ -201,13 +219,14 @@ def make_place_stop_action(pt_ref: Optional[np.ndarray], arm: str) -> Dict[str, 
     """回撤一点放置位置，保持不动。"""
     base = np.zeros(3, dtype=np.float32) if pt_ref is None else pt_ref
     calibrate_offset = _get_calibrate_offset(arm)
+    pitch = _get_pitch_normal_object(arm)
     active = np.array(
         [
             base[0] - GRIPPER_OFFSET - 0.05,
             base[1] + calibrate_offset,
             base[2] + Z_NORMAL_OBJECT-0.01,
             0,
-            PITCH_NORMAL_OBJECT,
+            pitch,
             0,
             OPEN,
         ],

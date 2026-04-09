@@ -17,10 +17,8 @@ from shelf_prompt_parser import ShelfPromptTask, parse_human_shelf_request
 from single_arm_pick_place import single_arm_pick_place
 from visualize_utils import (
     VisualizeContext,
-    emit_event,
-    emit_log,
-    emit_result,
-    emit_stage,
+    dispatch_debug_image,
+    render_pick_place_debug_view,
     should_stop,
 )
 
@@ -71,19 +69,8 @@ def _dump_payload(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-def _print_and_emit_log(
-    visualize: Optional[VisualizeContext],
-    *,
-    stage: str,
-    message: str,
-) -> None:
+def _print_log(message: str) -> None:
     print(message)
-    emit_log(
-        visualize,
-        source="smart_shelf_search",
-        stage=stage,
-        message=message,
-    )
 
 
 def _strip_place_region_prefix(place_target_prompt: str) -> str:
@@ -124,15 +111,7 @@ def _resolve_place_final_prompt(place_target_prompt: str) -> str:
         raise ValueError("place_target_prompt resolved to empty target")
     if not target.lower().startswith("the "):
         target = f"the {target}"
-    return (
-        f"Provide ONE 2D point for: {target}\n\n"
-        "Rules:\n"
-        '    Output JSON only: [{"point_2d":[x,y]}]\n'
-        "    x,y must be in [0,1000]\n"
-        "    The point MUST NOT be on any object inside or alreadt be placed on "
-        f"{target}\n"
-        "Return JSON only."
-    )
+    return f"empty part of {target}"
 
 
 def _get_place_lateral_offset_y(arm: str) -> float:
@@ -158,104 +137,80 @@ def _adjust_place_lateral_once(
     place_prompt: str,
     arm: str,
     *,
+    debug: bool,
     depth_median_n: int,
     visualize: Optional[VisualizeContext],
     lateral_vy_cmd: float = PLACE_LATERAL_VY_CMD,
     lateral_speed_mps: float = PLACE_LATERAL_SPEED_MPS,
     deadband_m: float = PLACE_LATERAL_DEADBAND_M,
     min_duration_s: float = PLACE_LATERAL_MIN_DURATION_S,
-) -> float:
+) -> Optional[float]:
     """根据放置点做一次底盘左右横移，并返回对后续 forward 段的时间补偿。"""
     center_offset_y = _get_place_lateral_offset_y(arm)
-    color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
-    if color is None or depth is None:
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message="skip place lateral adjust: aligned frame unavailable",
-        )
-        return 0.0
+    while True:
+        if should_stop(visualize):
+            return None
+        color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
+        if color is None or depth is None:
+            return 0.0
 
-    try:
-        place_px = _predict_one_point(color, place_prompt)
-    except RuntimeError as exc:
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message=f"skip place lateral adjust: point prediction failed: {exc}",
-        )
-        return 0.0
+        try:
+            place_px = _predict_one_point(color, place_prompt)
+        except RuntimeError as exc:
+            print(f"skip place lateral adjust: point prediction failed: {exc}")
+            return 0.0
 
-    place_pw = pixel_to_base_point_safe(
-        place_px,
-        depth,
-        robot_part="center",
-        offset=[0.0, center_offset_y, 0.0],
-    )
-    if place_pw is None:
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message=(
+        place_pw = pixel_to_base_point_safe(
+            place_px,
+            depth,
+            robot_part="center",
+            offset=[0.0, center_offset_y, 0.0],
+        )
+        if place_pw is None:
+            print(
                 "skip place lateral adjust: "
                 f"invalid depth for place pixel {place_px}"
-            ),
-        )
-        return 0.0
+            )
+            return 0.0
+
+        if debug:
+            vis = render_pick_place_debug_view(
+                color,
+                arm=arm,
+                pick_prompt="",
+                place_prompt=place_prompt,
+                pick_px=None,
+                place_px=place_px,
+            )
+            debug_result = dispatch_debug_image(
+                visualize,
+                source="smart_shelf_search",
+                panel="manip",
+                image=vis,
+                window_name="smart_shelf_place_lateral_adjust",
+                arm=arm,
+                pick_prompt="",
+                place_prompt=place_prompt,
+            )
+            if debug_result is None:
+                return None
+            if not debug_result:
+                continue
+        else:
+            cv2.destroyAllWindows()
+        break
 
     delta_y = float(place_pw[1])
-    emit_log(
-        visualize,
-        source="smart_shelf_search",
-        stage="place_lateral_adjust",
-        message=(
-            "place lateral adjust target: "
-            f"prompt={place_prompt}, arm={arm}, offset_y={center_offset_y:.3f}, "
-            f"pixel={place_px}, "
-            f"xyz=({place_pw[0]:.4f}, {place_pw[1]:.4f}, {place_pw[2]:.4f}), "
-            f"delta_y={delta_y:.4f}m"
-        ),
-    )
     if abs(delta_y) <= deadband_m:
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message=(
-                "skip place lateral adjust: "
-                f"|delta_y|={abs(delta_y):.4f}m <= deadband {deadband_m:.4f}m"
-            ),
-        )
         return 0.0
 
     duration = abs(delta_y) / lateral_speed_mps
     if duration < min_duration_s:
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message=(
-                "skip place lateral adjust: "
-                f"duration={duration:.3f}s < {min_duration_s:.3f}s"
-            ),
-        )
         return 0.0
 
     # 与 shelf_search 里的 snake-scan 约定一致：+vy 表示向右，-vy 表示向左。
     vy = -lateral_vy_cmd if delta_y > 0.0 else lateral_vy_cmd
     move_dir = "left" if vy < 0.0 else "right"
-    emit_log(
-        visualize,
-        source="smart_shelf_search",
-        stage="place_lateral_adjust",
-        message=(
-            "execute place lateral adjust: "
-            f"move_{move_dir}, vy={vy:.3f}, duration={duration:.3f}s"
-        ),
-    )
     step_base_duration(
         arx,
         vx=0.0,
@@ -278,7 +233,6 @@ def smart_shelf_search(
     debug_pick_place: bool = False,
     depth_median_n: int = 5,
     visualize: Optional[VisualizeContext] = None,
-    emit_result_event: bool = True,
 ):
     if not nav_pick_prompt:
         raise ValueError("nav_pick_prompt must be non-empty")
@@ -294,14 +248,6 @@ def smart_shelf_search(
     place_return_forward_duration = PLACE_RETURN_FORWARD_DURATION_S
 
     try:
-        emit_stage(
-            visualize,
-            source="smart_shelf_search",
-            stage="start",
-            message="Start smart shelf search",
-            nav_pick_prompt=nav_pick_prompt,
-            place_target_prompt=place_target_prompt,
-        )
         pick_prompt = nav_pick_prompt
         # if "blue" in nav_pick_prompt.lower() or "蓝" in nav_pick_prompt:
         #     distance = 0.425
@@ -340,13 +286,6 @@ def smart_shelf_search(
                 if stopped
                 else "first nav_to_goal failed or canceled"
             )
-            if emit_result_event:
-                emit_result(
-                    visualize,
-                    source="smart_shelf_search",
-                    status=status,
-                    message=message,
-                )
             return {
                 "success": False,
                 "message": message,
@@ -357,31 +296,13 @@ def smart_shelf_search(
                 "place_arm": None,
             }
         if "blue" in nav_pick_prompt.lower() or "蓝" in nav_pick_prompt:
-            emit_stage(
-                visualize,
-                source="smart_shelf_search",
-                stage="move_away",
-                message="Check and move away front blocker",
-            )
             result = move_away(
                 arx=arx,
                 pick_prompt="a blue box",
-                debug_raw=debug_pick_place and not (
-                    visualize is not None and visualize.page_debug
-                ),
+                debug_raw=debug_pick_place,
                 depth_median_n=5,
                 home_after_move=True,
                 visualize=visualize,
-            )
-            emit_log(
-                visualize,
-                source="smart_shelf_search",
-                stage="move_away",
-                message=(
-                    f"move_away blocked={result.blocked}, "
-                    f"moved_away={result.moved_away}, "
-                    f"arm={result.arm}, message={result.message}"
-                ),
             )
             pick_prompt = "center of a blue box"
             _, _, pick_arm = single_arm_pick_place(
@@ -417,13 +338,6 @@ def smart_shelf_search(
                 if stopped
                 else "pick canceled or failed"
             )
-            if emit_result_event:
-                emit_result(
-                    visualize,
-                    source="smart_shelf_search",
-                    status=status,
-                    message=message,
-                )
             return {
                 "success": False,
                 "message": message,
@@ -468,13 +382,6 @@ def smart_shelf_search(
                 if stopped
                 else "second nav_to_goal failed or canceled"
             )
-            if emit_result_event:
-                emit_result(
-                    visualize,
-                    source="smart_shelf_search",
-                    status=status,
-                    message=message,
-                )
             return {
                 "success": False,
                 "message": message,
@@ -493,56 +400,41 @@ def smart_shelf_search(
         #     arx.step_lift(20.0)
         # else:
         #     arx.step_lift(14.0)
-        if "white" in place_target_prompt.lower() or "白" in place_target_prompt:
-            arx.step_lift(0.0)
-        else:
-            arx.step_lift(14.5)
+        # if "white" in place_target_prompt.lower() or "白" in place_target_prompt:
+        #     arx.step_lift(0.0)
+        # else:
+        arx.step_lift(14.5)
         center_place_prompt = _resolve_place_center_prompt(
             place_target_prompt,
         )
         resolved_place_prompt = _resolve_place_final_prompt(
             place_target_prompt,
         )
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_prompt",
-            message=(
-                f"resolved place prompt: {resolved_place_prompt} "
-                f"(from target: {place_target_prompt})"
-            ),
-        )
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_prompt",
-            message=(
-                f"resolved place center prompt: {center_place_prompt} "
-                f"(from target: {place_target_prompt})"
-            ),
-        )
-        place_return_forward_duration += _adjust_place_lateral_once(
+        lateral_adjust_delta = _adjust_place_lateral_once(
             arx=arx,
             place_prompt=center_place_prompt,
             arm=pick_arm,
+            debug=debug_pick_place,
             depth_median_n=depth_median_n,
             visualize=visualize,
         )
+        if lateral_adjust_delta is None:
+            message = "stopped during place lateral adjust"
+            return {
+                "success": False,
+                "message": message,
+                "status": "stopped",
+                "first_nav_result": first_nav_result,
+                "second_nav_result": second_nav_result,
+                "pick_arm": pick_arm,
+                "place_arm": None,
+            }
+        place_return_forward_duration += lateral_adjust_delta
         place_return_forward_duration = max(0.0, place_return_forward_duration)
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="place_lateral_adjust",
-            message=(
-                "adjusted return forward duration after place align: "
-                f"{place_return_forward_duration:.3f}s"
-            ),
-        )
         _, _, place_arm = single_arm_pick_place(
             arx=arx,
             pick_prompt="",
-            place_prompt=place_target_prompt,
-            place_all_prompt=resolved_place_prompt,
+            place_prompt=resolved_place_prompt,
             arm_side=pick_arm,
             item_type="normal object",
             debug=debug_pick_place,
@@ -558,13 +450,6 @@ def smart_shelf_search(
                 if stopped
                 else "place canceled or failed"
             )
-            if emit_result_event:
-                emit_result(
-                    visualize,
-                    source="smart_shelf_search",
-                    status=status,
-                    message=message,
-                )
             return {
                 "success": False,
                 "message": message,
@@ -583,23 +468,7 @@ def smart_shelf_search(
                 0.0,
                 duration=place_return_forward_duration,
             )
-        else:
-            emit_log(
-                visualize,
-                source="smart_shelf_search",
-                stage="place_lateral_adjust",
-                message="skip return forward segment: adjusted duration <= 0",
-            )
         step_base_duration(arx, 0.0, 0.0, -1.0, duration=5.05)
-        if emit_result_event:
-            emit_result(
-                visualize,
-                source="smart_shelf_search",
-                status="success",
-                message="smart shelf search completed",
-                pick_arm=pick_arm,
-                place_arm=place_arm,
-            )
         return {
             "success": True,
             "message": "smart shelf search completed",
@@ -629,20 +498,6 @@ def smart_shelf_search_from_request(
         _serialize_prompt_task(task, task_index=index, task_count=task_count)
         for index, task in enumerate(plan.tasks, start=1)
     ]
-    emit_event(
-        visualize,
-        "parsed_request",
-        source="smart_shelf_search",
-        raw_request=plan.raw_request,
-        task_count=task_count,
-        tasks=parsed_tasks,
-        nav_pick_prompt=plan.nav_pick_prompt,
-        place_target_prompt=plan.place_target_prompt,
-        pick_target=plan.pick_target,
-        used_default_place_target_prompt=plan.used_default_place_target_prompt,
-        parser_source=plan.parser_source,
-    )
-
     resolved_prompts = {
         "raw_request": plan.raw_request,
         "task_count": task_count,
@@ -653,13 +508,9 @@ def smart_shelf_search_from_request(
         "used_default_place_target_prompt": plan.used_default_place_target_prompt,
         "parser_source": plan.parser_source,
     }
-    _print_and_emit_log(
-        visualize,
-        stage="parsed_request",
-        message=(
-            "Parsed smart shelf search request:\n"
-            f"{_dump_payload(resolved_prompts)}"
-        ),
+    _print_log(
+        "Parsed smart shelf search request:\n"
+        f"{_dump_payload(resolved_prompts)}"
     )
 
     task_results: list[dict[str, Any]] = []
@@ -687,35 +538,14 @@ def smart_shelf_search_from_request(
                 "task_results": task_results,
                 "resolved_prompts": resolved_prompts,
             }
-            emit_result(
-                visualize,
-                source="smart_shelf_search",
-                status="stopped",
-                message=message,
-                pick_arm=result["pick_arm"],
-                place_arm=result["place_arm"],
-                completed_task_count=len(task_results),
-                total_task_count=task_count,
-            )
             return result
 
         task_payload = _serialize_prompt_task(
             task, task_index=task_index, task_count=task_count
         )
-        _print_and_emit_log(
-            visualize,
-            stage="request_task",
-            message=(
-                f"Execute parsed task {task_index}/{task_count}:\n"
-                f"{_dump_payload(task_payload)}"
-            ),
-        )
-        emit_stage(
-            visualize,
-            source="smart_shelf_search",
-            stage="request_task",
-            message=f"Execute parsed task {task_index}/{task_count}",
-            **task_payload,
+        _print_log(
+            f"Execute parsed task {task_index}/{task_count}:\n"
+            f"{_dump_payload(task_payload)}"
         )
         task_result = dict(smart_shelf_search(
             arx=arx,
@@ -728,7 +558,6 @@ def smart_shelf_search_from_request(
             debug_pick_place=debug_pick_place,
             depth_median_n=depth_median_n,
             visualize=visualize,
-            emit_result_event=False,
         ))
         task_result["task_index"] = task_index
         task_result["task_count"] = task_count
@@ -761,25 +590,7 @@ def smart_shelf_search_from_request(
                 "task_results": task_results,
                 "resolved_prompts": resolved_prompts,
             }
-            emit_result(
-                visualize,
-                source="smart_shelf_search",
-                status=status,
-                message=overall_message,
-                pick_arm=result["pick_arm"],
-                place_arm=result["place_arm"],
-                failed_task_index=task_index,
-                completed_task_count=task_index - 1,
-                total_task_count=task_count,
-            )
             return result
-
-        emit_log(
-            visualize,
-            source="smart_shelf_search",
-            stage="request_task",
-            message=f"completed parsed task {task_index}/{task_count}",
-        )
 
     result = {
         "success": True,
@@ -810,16 +621,6 @@ def smart_shelf_search_from_request(
         "task_results": task_results,
         "resolved_prompts": resolved_prompts,
     }
-    emit_result(
-        visualize,
-        source="smart_shelf_search",
-        status="success",
-        message=result["message"],
-        pick_arm=result["pick_arm"],
-        place_arm=result["place_arm"],
-        completed_task_count=task_count,
-        total_task_count=task_count,
-    )
     return result
 
 

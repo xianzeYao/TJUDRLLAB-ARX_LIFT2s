@@ -410,14 +410,41 @@ def _raise_lowest_place_z_only(
     return adjusted_seq
 
 
+def _adjust_last_place_x_only(
+    place_seq,
+    *,
+    arm: str,
+    x_shift: float,
+):
+    if abs(float(x_shift)) < 1e-8 or not place_seq:
+        return place_seq
+
+    adjusted_seq = []
+    last_idx = len(place_seq) - 1
+    for idx, act in enumerate(place_seq):
+        adjusted_act = {}
+        for key, value in act.items():
+            if isinstance(value, np.ndarray):
+                adjusted_act[key] = np.asarray(value, dtype=np.float32).copy()
+            else:
+                adjusted_act[key] = value
+        if idx == last_idx:
+            active = adjusted_act.get(arm)
+            if isinstance(active, np.ndarray) and active.shape[0] >= 1:
+                active[0] += float(x_shift)
+        adjusted_seq.append(adjusted_act)
+    return adjusted_seq
+
+
 def execute_return_to_source_sequence(
     arx,
     pick_ref: Optional[np.ndarray],
     arm: str,
     item_type: str,
-    ref_x_shift: float = 0.05,
+    ref_x_shift: float = 0.07,
     ref_z_shift: float = -0.15,
-    bottom_z_raise: float = 0.05,
+    bottom_z_raise: float = 0.15,
+    retreat_x_shift: float = -0.05,
 ) -> None:
     """把当前抓着的物体按对应放置模板送回 pick 源位附近释放。"""
     if pick_ref is None:
@@ -434,6 +461,11 @@ def execute_return_to_source_sequence(
         place_seq,
         arm=arm,
         z_raise=bottom_z_raise,
+    )
+    place_seq = _adjust_last_place_x_only(
+        place_seq,
+        arm=arm,
+        x_shift=retreat_x_shift,
     )
     for act in place_seq:
         arx.step_smooth_eef(act)

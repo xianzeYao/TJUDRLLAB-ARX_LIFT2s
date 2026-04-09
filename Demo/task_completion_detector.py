@@ -12,6 +12,7 @@ from arx_pointing import (
     predict_multi_points_from_multi_image,
     predict_multi_points_from_rgb,
 )
+from demo_utils import get_pick_close_target
 
 
 DEFAULT_HAND_CAMERA_BY_ARM = {
@@ -28,6 +29,18 @@ class TaskCheckResult:
     wrist_description: Optional[str] = None
     third_status: Optional[str] = None
     wrist_status: Optional[str] = None
+    next_action: Optional[str] = None
+    close_target: Optional[float] = None
+    actual_gripper: Optional[float] = None
+    hand_camera_key: Optional[str] = None
+    third_camera_key: Optional[str] = None
+    pre_pick_third_camera_key: Optional[str] = None
+
+
+@dataclass
+class TaskCheckContext:
+    pre_pick_third_image: Optional[np.ndarray] = None
+    pre_pick_third_camera_key: Optional[str] = None
 
 
 def _print_decision(title: str, parts: list[tuple[str, Any]]) -> None:
@@ -102,6 +115,19 @@ def _resolve_hand_camera_key(
     if not hand_camera_view:
         raise ValueError(f"no hand camera configured for arm={arm!r}")
     return f"{hand_camera_view}_color"
+
+
+def _read_current_gripper(arx, arm: str) -> Optional[float]:
+    status = arx.get_robot_status().get(arm)
+    if status is None or not hasattr(status, "joint_pos"):
+        print(f"{arm} arm joint status unavailable, skip gripper read")
+        return None
+
+    joint_pos = np.asarray(status.joint_pos, dtype=np.float32).reshape(-1)
+    if joint_pos.size < 7:
+        print(f"{arm} arm joint_pos invalid, skip gripper read")
+        return None
+    return float(joint_pos[6])
 
 
 def capture_hand_check_frame(
@@ -201,6 +227,36 @@ def capture_task_check_frames(
     )
 
 
+def prepare_task_completion_check(
+    arx,
+    arm: str,
+    *,
+    mode: Literal["plus", "single_image", "multi_image"] = "single_image",
+    third_camera_view: str = "camera_h",
+    hand_camera_by_arm: Optional[Mapping[str, str]] = None,
+    target_size: tuple[int, int] = (640, 480),
+    pre_pick_settle_s: float = 0.0,
+    max_retries: int = 1,
+    retry_sleep_s: float = 0.2,
+) -> TaskCheckContext:
+    del arm, hand_camera_by_arm
+    if mode != "plus":
+        return TaskCheckContext()
+
+    pre_pick_third_image, pre_pick_third_camera_key = capture_third_check_frame(
+        arx=arx,
+        third_camera_view=third_camera_view,
+        target_size=target_size,
+        settle_s=pre_pick_settle_s,
+        max_retries=max_retries,
+        retry_sleep_s=retry_sleep_s,
+    )
+    return TaskCheckContext(
+        pre_pick_third_image=pre_pick_third_image,
+        pre_pick_third_camera_key=pre_pick_third_camera_key,
+    )
+
+
 def _build_multi_image_task_check_prompt(
     *,
     pick_prompt: str,
@@ -239,12 +295,14 @@ def _build_third_person_delta_check_prompt(
 ) -> str:
     lines = [
         "Image 1 is before pick. Image 2 is after pick.",
-        f"Is one {pick_prompt} missing in image 2 compared with image 1?",
+        f"Compare the number of visible {pick_prompt}.",
+        f"If the same {pick_prompt} is still visible in image 2 but only moved to another position, do not count it as missing.",
         "Return only valid JSON with keys:",
         '- "status": one of "success", "fail"',
         '- "description": short evidence-based explanation',
-        f'Use status=success only when image 2 clearly has one fewer {pick_prompt} than image 1.',
+        f'Use status=success only when image 2 clearly has one fewer visible {pick_prompt} than image 1.',
     ]
+    return "\n".join(lines)
     return "\n".join(lines)
 
 
@@ -401,7 +459,7 @@ def predict_third_person_delta_check(
         [
             ("target", repr(pick_prompt)),
             ("result", result.status),
-            ("rule", "第二张比第一张少一个目标才算success"),
+            ("rule", "第二张比第一张少一个可见目标才算success，仅移动不算"),
             ("desc", result.description),
         ],
     )
@@ -547,13 +605,176 @@ def predict_task_completion(
     )
 
 
+def _run_plus_task_completion_check(
+    arx,
+    arm: str,
+    *,
+    pick_prompt: str,
+    item_type: str,
+    third_camera_view: str = "camera_h",
+    hand_camera_by_arm: Optional[Mapping[str, str]] = None,
+    target_size: tuple[int, int] = (640, 480),
+    settle_s: float = 1.0,
+    max_retries: int = 1,
+    retry_sleep_s: float = 0.2,
+    check_context: Optional[TaskCheckContext] = None,
+) -> TaskCheckResult:
+    close_target = get_pick_close_target(item_type)
+    actual_gripper = _read_current_gripper(arx, arm)
+
+    if actual_gripper is not None and actual_gripper >= close_target:
+        description = (
+            "夹爪接近闭合位，视为未夹到物体，"
+            f"actual_gripper={actual_gripper:.3f}, close_target={close_target:.3f}"
+        )
+        _print_decision(
+            "[task_check][plus][夹爪]",
+            [
+                ("actual", actual_gripper),
+                ("target", f"{close_target:.3f}"),
+                ("result", "empty"),
+                ("next", "retry"),
+            ],
+        )
+        return TaskCheckResult(
+            status="fail",
+            description=description,
+            next_action="retry",
+            close_target=close_target,
+            actual_gripper=actual_gripper,
+        )
+
+    _print_decision(
+        "[task_check][plus][夹爪]",
+        [
+            ("actual", actual_gripper),
+            ("target", f"{close_target:.3f}"),
+            ("result", "has_object"),
+            ("next", "check_wrist"),
+        ],
+    )
+    hand_image, hand_camera_key = capture_hand_check_frame(
+        arx=arx,
+        arm=arm,
+        hand_camera_by_arm=hand_camera_by_arm,
+        target_size=target_size,
+        settle_s=settle_s,
+        max_retries=max_retries,
+        retry_sleep_s=retry_sleep_s,
+    )
+    wrist_result = predict_wrist_target_check(
+        hand_image=hand_image,
+        pick_prompt=pick_prompt,
+    )
+    _print_decision(
+        "[task_check][plus][腕部]",
+        [
+            ("result", wrist_result.status),
+            ("desc", wrist_result.description),
+        ],
+    )
+    if wrist_result.status == "success":
+        _print_decision(
+            "[task_check][plus][最终]",
+            [
+                ("wrist", "success"),
+                ("final", "success"),
+                ("next", "continue"),
+            ],
+        )
+        return TaskCheckResult(
+            status="success",
+            description=wrist_result.description,
+            wrist_description=wrist_result.description,
+            wrist_status=wrist_result.status,
+            next_action="continue",
+            close_target=close_target,
+            actual_gripper=actual_gripper,
+            hand_camera_key=hand_camera_key,
+        )
+
+    if check_context is None or check_context.pre_pick_third_image is None:
+        raise RuntimeError("missing pre-pick third-person frame")
+
+    after_pick_third_image, third_camera_key = capture_third_check_frame(
+        arx=arx,
+        third_camera_view=third_camera_view,
+        target_size=target_size,
+        settle_s=settle_s,
+        max_retries=max_retries,
+        retry_sleep_s=retry_sleep_s,
+    )
+    third_result = predict_third_person_delta_check(
+        before_image=check_context.pre_pick_third_image,
+        after_image=after_pick_third_image,
+        pick_prompt=pick_prompt,
+    )
+    _print_decision(
+        "[task_check][plus][第三视角]",
+        [
+            ("result", third_result.status),
+            ("desc", third_result.description),
+        ],
+    )
+    if third_result.status == "success":
+        _print_decision(
+            "[task_check][plus][最终]",
+            [
+                ("wrist", "fail"),
+                ("third", "success"),
+                ("final", "success"),
+                ("next", "continue"),
+            ],
+        )
+        return TaskCheckResult(
+            status="success",
+            description=third_result.description,
+            third_description=third_result.description,
+            wrist_description=wrist_result.description,
+            third_status=third_result.status,
+            wrist_status=wrist_result.status,
+            next_action="continue",
+            close_target=close_target,
+            actual_gripper=actual_gripper,
+            hand_camera_key=hand_camera_key,
+            third_camera_key=third_camera_key,
+            pre_pick_third_camera_key=check_context.pre_pick_third_camera_key,
+        )
+
+    _print_decision(
+        "[task_check][plus][最终]",
+        [
+            ("wrist", "fail"),
+            ("third", "fail"),
+            ("final", "failed"),
+            ("next", "exit"),
+        ],
+    )
+    return TaskCheckResult(
+        status="fail",
+        description=(
+            f"wrist={wrist_result.description}; third={third_result.description}"
+        ),
+        third_description=third_result.description,
+        wrist_description=wrist_result.description,
+        third_status=third_result.status,
+        wrist_status=wrist_result.status,
+        next_action="exit",
+        close_target=close_target,
+        actual_gripper=actual_gripper,
+        hand_camera_key=hand_camera_key,
+        third_camera_key=third_camera_key,
+        pre_pick_third_camera_key=check_context.pre_pick_third_camera_key,
+    )
+
+
 def run_task_completion_check(
     arx,
     arm: str,
     *,
     pick_prompt: str,
     item_type: str,
-    mode: Literal["single_image", "multi_image"] = "single_image",
+    mode: Literal["plus", "single_image", "multi_image"] = "single_image",
     third_camera_view: str = "camera_h",
     hand_camera_by_arm: Optional[Mapping[str, str]] = None,
     target_size: tuple[int, int] = (640, 480),
@@ -567,7 +788,23 @@ def run_task_completion_check(
     top_p: float = 0.8,
     seed: int = 3407,
     max_tokens: int = 256,
+    check_context: Optional[TaskCheckContext] = None,
 ) -> TaskCheckResult:
+    if mode == "plus":
+        return _run_plus_task_completion_check(
+            arx=arx,
+            arm=arm,
+            pick_prompt=pick_prompt,
+            item_type=item_type,
+            third_camera_view=third_camera_view,
+            hand_camera_by_arm=hand_camera_by_arm,
+            target_size=target_size,
+            settle_s=settle_s,
+            max_retries=max_retries,
+            retry_sleep_s=retry_sleep_s,
+            check_context=check_context,
+        )
+
     hand_image, third_image, hand_camera_key, third_camera_key = capture_task_check_frames(
         arx,
         arm,
@@ -578,7 +815,7 @@ def run_task_completion_check(
         max_retries=max_retries,
         retry_sleep_s=retry_sleep_s,
     )
-    return predict_task_completion(
+    result = predict_task_completion(
         hand_image=hand_image,
         third_image=third_image,
         pick_prompt=pick_prompt,
@@ -592,3 +829,10 @@ def run_task_completion_check(
         seed=seed,
         max_tokens=max_tokens,
     )
+    result.hand_camera_key = hand_camera_key
+    result.third_camera_key = third_camera_key
+    if result.status == "success":
+        result.next_action = "continue"
+    else:
+        result.next_action = "open_close_retry"
+    return result

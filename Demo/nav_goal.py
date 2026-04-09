@@ -18,10 +18,6 @@ from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
 from visualize_utils import (
     VisualizeContext,
     dispatch_debug_image,
-    emit_event,
-    emit_log,
-    emit_result,
-    emit_stage,
     get_key_nonblock,
     init_keyboard,
     render_nav_goal_debug_view,
@@ -167,23 +163,8 @@ def nav_to_goal(
     consecutive_true_required = 3
 
     def _log(message: str, *, stage: Optional[str] = None, **payload) -> None:
+        del stage, payload
         print(message)
-        emit_log(
-            visualize,
-            source="nav_to_goal",
-            stage=stage,
-            message=message,
-            **payload,
-        )
-
-    def _stage(stage: str, message: str, **payload) -> None:
-        emit_stage(
-            visualize,
-            source="nav_to_goal",
-            stage=stage,
-            message=message,
-            **payload,
-        )
 
     def _start_rotate_search() -> None:
         nonlocal rotating_search
@@ -191,7 +172,6 @@ def nav_to_goal(
             return
         arx.step_base(0.0, 0.0, 1.0)
         rotating_search = True
-        _stage("rotate_search", f"Rotate search started for {goal}")
 
     def _stop_rotate_search() -> None:
         nonlocal rotating_search
@@ -199,7 +179,6 @@ def nav_to_goal(
             return
         arx.step_base(0.0, 0.0, 0.0)
         rotating_search = False
-        _stage("rotate_search", "Rotate search stopped")
 
     def _check_nav_emergency_stop() -> bool:
         if should_stop(visualize):
@@ -208,7 +187,6 @@ def nav_to_goal(
         return key == "n"
 
     try:
-        _stage("start", f"Start navigation to {goal}", goal=goal)
         arx.step_lift(lift_height)
         while True:
             if should_stop(visualize):
@@ -222,7 +200,6 @@ def nav_to_goal(
                 _log("Emergency stop received.", stage="stopped")
                 return last_result
 
-            _stage("capture", f"Capture top camera for {goal}", goal=goal)
             frames = arx.get_camera(target_size=(
                 640, 480), return_status=False)
             color = frames.get("camera_h_color")
@@ -242,12 +219,6 @@ def nav_to_goal(
                 _apply_roi_focus(color, presence_roi_polygon)
                 if presence_roi_polygon is not None
                 else color
-            )
-            _stage(
-                "presence_check",
-                f"Check goal presence for {goal}",
-                goal=goal,
-                rotating_search=rotating_search,
             )
             detect_goal = _vote_goal_presence(
                 presence_color, goal=goal, vote_times=vote_times)
@@ -327,16 +298,6 @@ def nav_to_goal(
 
             path = [(0.0, 0.0), (float(goal_pw[0]), float(-goal_pw[1]))]
             actions = path_to_actions(path)
-            emit_event(
-                visualize,
-                "nav_plan",
-                source="nav_to_goal",
-                goal=goal,
-                goal_pixel=(float(goal_pixel[0]), float(goal_pixel[1])),
-                goal_pw=np.asarray(goal_pw, dtype=np.float32).tolist(),
-                actions=[(str(action), float(value))
-                         for action, value in actions],
-            )
 
             if debug_raw:
                 debug_vis = render_nav_goal_debug_view(
@@ -378,12 +339,6 @@ def nav_to_goal(
                     f"target_lift={lift_height_target:.3f}",
                     stage="lift_target",
                 )
-            _stage(
-                "execute_actions",
-                f"Execute {len(actions)} nav actions",
-                goal=goal,
-                action_count=len(actions),
-            )
             executed_rotations, interrupted = execute_nav_actions(
                 arx,
                 actions,
@@ -398,16 +353,6 @@ def nav_to_goal(
             if rotate_recover:
                 recover_rotations(arx, executed_rotations)
             last_result = (goal_pw, actions)
-            emit_result(
-                visualize,
-                source="nav_to_goal",
-                status="success",
-                message="navigation completed",
-                goal=goal,
-                goal_pw=np.asarray(goal_pw, dtype=np.float32).tolist(),
-                actions=[(str(action), float(value))
-                         for action, value in actions],
-            )
             if not continuous:
                 return last_result
     finally:

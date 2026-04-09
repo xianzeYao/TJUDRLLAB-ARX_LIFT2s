@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import queue
 import sys
 import threading
@@ -61,35 +60,6 @@ CAMERA_IDLE_SLEEP_S = 0.10
 UI_REFRESH_INTERVAL_S = 0.05
 
 
-def _serialize_json(value: Any) -> Any:
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, (np.integer, np.floating)):
-        return value.item()
-    if isinstance(value, dict):
-        return {str(k): _serialize_json(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_serialize_json(v) for v in value]
-    if hasattr(value, "__dict__"):
-        return {
-            str(k): _serialize_json(v)
-            for k, v in vars(value).items()
-            if not str(k).startswith("_")
-        }
-    return str(value)
-
-
-def _dump_json(value: Any) -> str:
-    return json.dumps(
-        _serialize_json(value),
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    )
-
-
 def _timestamp() -> str:
     return time.strftime("%H:%M:%S")
 
@@ -112,9 +82,6 @@ class RuntimeSnapshot:
     active_task: str = "idle"
     task_state: str = "idle"
     current_stage: str = "Waiting for task"
-    parsed_request: Optional[dict[str, Any]] = None
-    telemetry: dict[str, Any] = field(default_factory=dict)
-    result: Optional[dict[str, Any]] = None
     last_error: str = ""
 
 
@@ -226,46 +193,8 @@ class DemoController:
             self._state.task_state = task_state
             self._state.current_stage = stage
 
-    def handle_event(self, event: str, payload: dict[str, Any]) -> None:
-        source = str(payload.get("source", "demo"))
-        stage = payload.get("stage")
-        message = payload.get("message")
-
-        if event == "log":
-            prefix = f"{source}"
-            if stage:
-                prefix += f"/{stage}"
-            self._append_log(f"{prefix}: {message}")
-            return
-
-        if event == "stage":
-            stage_text = str(message or stage or source)
-            with self._lock:
-                self._state.current_stage = stage_text
-                self._state.telemetry["latest_stage"] = {
-                    "source": source,
-                    "stage": stage,
-                    "message": message,
-                }
-            return
-
-        with self._lock:
-            if event == "parsed_request":
-                self._state.parsed_request = dict(payload)
-                self._state.telemetry["parsed_request"] = dict(payload)
-            elif event == "result":
-                self._state.result = dict(payload)
-                status = str(payload.get("status", "completed"))
-                if status in {"success", "completed"}:
-                    self._state.task_state = "completed"
-                elif status in {"failed", "error"}:
-                    self._state.task_state = "failed"
-                elif status in {"stopped", "canceled"}:
-                    self._state.task_state = status
-            else:
-                self._state.telemetry[event] = dict(payload)
-
     def _begin_task(self, task_name: str, debug_enabled: bool) -> Optional[str]:
+        del debug_enabled
         with self._lock:
             if self._task_running:
                 return "Another task is still running."
@@ -276,9 +205,6 @@ class DemoController:
             self._state.active_task = task_name
             self._state.task_state = "starting"
             self._state.current_stage = "Preparing task"
-            self._state.parsed_request = None
-            self._state.telemetry = {"local_debug_enabled": debug_enabled}
-            self._state.result = None
             self._state.logs = []
             self._state.last_error = ""
         return None
@@ -324,9 +250,7 @@ class DemoController:
                     "nav dual sweep", "running", "Reset robot")
                 env.reset()
                 visualize = VisualizeContext(
-                    on_event=self.handle_event,
                     stop_checker=self._stop_task.is_set,
-                    page_debug=False,
                 )
                 nav_dual_sweep(
                     env,
@@ -340,24 +264,6 @@ class DemoController:
                     vote_times=DEFAULT_NAV_VOTE_TIMES,
                     visualize=visualize,
                 )
-                if self._stop_task.is_set():
-                    self.handle_event(
-                        "result",
-                        {
-                            "source": "nav_dual_sweep",
-                            "status": "stopped",
-                            "message": "nav dual sweep stopped",
-                        },
-                    )
-                else:
-                    self.handle_event(
-                        "result",
-                        {
-                            "source": "nav_dual_sweep",
-                            "status": "completed",
-                            "message": "nav dual sweep finished",
-                        },
-                    )
             except Exception as exc:
                 self._append_log(f"Task failed: {exc}")
                 self._append_log(traceback.format_exc().strip())
@@ -396,11 +302,9 @@ class DemoController:
                     "smart shelf search", "running", "Reset robot")
                 env.reset()
                 visualize = VisualizeContext(
-                    on_event=self.handle_event,
                     stop_checker=self._stop_task.is_set,
-                    page_debug=False,
                 )
-                result = smart_shelf_search_from_request(
+                smart_shelf_search_from_request(
                     arx=env,
                     request=request.strip(),
                     first_nav_height=DEFAULT_SHELF_FIRST_NAV_HEIGHT,
@@ -409,19 +313,6 @@ class DemoController:
                     debug_pick_place=DEFAULT_SHELF_PICK_DEBUG,
                     depth_median_n=DEFAULT_SHELF_DEPTH_MEDIAN_N,
                     visualize=visualize,
-                )
-                message = str(result.get("message", ""))
-                status = "success" if result.get("success") else "failed"
-                if self._stop_task.is_set() or message.lower().startswith("stopped"):
-                    status = "stopped"
-                self.handle_event(
-                    "result",
-                    {
-                        "source": "smart_shelf_search",
-                        "status": status,
-                        "message": message,
-                        "result": result,
-                    },
                 )
             except Exception as exc:
                 self._append_log(f"Task failed: {exc}")

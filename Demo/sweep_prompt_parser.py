@@ -81,7 +81,7 @@ def _build_parser_prompt(request: str) -> str:
         "You convert a human floor-sweeping request into robot grounding targets.\n"
         "Return only one JSON object with this key:\n"
         "{\n"
-        '  "sweep_target": "paper cup or bottle on the floor"\n'
+        '  "sweep_target": ""\n'
         "}\n"
         "Rules:\n"
         '- If the request means generally sweep or clean the floor, set "sweep_target" to "".\n'
