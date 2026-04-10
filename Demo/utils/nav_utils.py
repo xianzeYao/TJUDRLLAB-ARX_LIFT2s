@@ -6,7 +6,7 @@ import math
 import time
 from typing import Callable, List, Optional, Tuple
 
-from demo_utils import step_base_duration
+from .demo_utils import step_base_duration
 
 BASE_FORWARD_SPEED = 0.155
 BASE_ROTATE_SPEED = (2.0 * math.pi) / 20.11

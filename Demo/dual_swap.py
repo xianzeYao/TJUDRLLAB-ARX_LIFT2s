@@ -2,28 +2,28 @@ import time
 import sys
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_ros2_env import ARXRobotEnv  # noqa
-from arx_pointing import (
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
+from utils import (
+    VisualizeContext,
+    build_swap_sequence,
+    dispatch_debug_image,
+    get_aligned_frames,
+    init_keyboard,
+    pixel_to_base_point_safe,
     predict_multi_points_from_multi_image,
     predict_multi_points_from_rgb,
     predict_point_from_rgb,
-)
-from motion_swap import build_swap_sequence
-from point2pos_utils import (
-    get_aligned_frames,
-    pixel_to_base_point_safe,
-)
-from visualize_utils import (
-    VisualizeContext,
-    dispatch_debug_image,
-    init_keyboard,
     render_dual_swap_debug_view,
     restore_keyboard,
     should_stop,

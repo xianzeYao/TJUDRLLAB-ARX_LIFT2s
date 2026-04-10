@@ -11,34 +11,34 @@ from typing import Callable, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from arx_pointing import predict_multi_points_from_rgb
-from motion_pick_place_cup import (
+from .arx_pointing import predict_multi_points_from_rgb
+from .motion_pick_place_cup import (
     GRIPPER_CUP,
     build_pick_cup_sequence,
     build_place_cup_sequence,
 )
-from motion_pick_place_deepbox import (
+from .motion_pick_place_deepbox import (
     GRIPPER_DEEPBOX,
     build_pick_deepbox_sequence,
     build_place_deepbox_sequence,
 )
-from motion_pick_place_normal_object import (
+from .motion_pick_place_normal_object import (
     GRIPPER_NORMAL_OBJECT,
     build_pick_normal_object_sequence,
     build_place_normal_object_sequence,
 )
-from motion_pick_place_straw import (
+from .motion_pick_place_straw import (
     CLOSE as GRIPPER_STRAW,
     build_pick_straw_sequence,
     build_place_straw_sequence,
 )
-from motion_pick_place_hug import (
+from .motion_pick_place_hug import (
     build_pick_hug_sequence,
     build_place_hug_sequence,
 )
-from motion_move_away import build_move_away_sequence
+from .motion_move_away import build_move_away_sequence
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parents[2]
 DEPLOYMENT_DIR = ROOT_DIR / "Deployment"
 if str(DEPLOYMENT_DIR) not in sys.path:
     sys.path.append(str(DEPLOYMENT_DIR))

@@ -1,8 +1,13 @@
 
 import time
 import sys
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
-from arx_ros2_env import ARXRobotEnv  # noqa
+from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 import numpy as np
 from arx5_arm_msg.msg._robot_cmd import RobotCmd  # 控制命令
 

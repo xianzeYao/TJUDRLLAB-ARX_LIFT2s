@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 if TYPE_CHECKING:
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -25,9 +25,6 @@ if str(REPO_ROOT) not in sys.path:
 LEROBOT_SRC_ROOT = REPO_ROOT / "lerobot" / "src"
 if str(LEROBOT_SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(LEROBOT_SRC_ROOT))
-ROS2_ROOT = REPO_ROOT / "ARX_Realenv" / "ROS2"
-if str(ROS2_ROOT) not in sys.path:
-    sys.path.insert(0, str(ROS2_ROOT))
 
 
 CONFIG_FILENAME = "config.json"
@@ -42,7 +39,7 @@ def create_default_env(
     image_height: int = 480,
 ) -> "ARXRobotEnv":
     """Create ARXRobotEnv using the requested deployment defaults."""
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
     return ARXRobotEnv(
         duration_per_step=1.0 / 20.0,

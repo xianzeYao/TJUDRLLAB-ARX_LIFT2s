@@ -1,20 +1,24 @@
 from nav_goal import nav_to_goal
 from dual_swap import dual_swap, pick_tools, release_tools
 import sys
+from pathlib import Path
 from typing import Optional
 import numpy as np
-from visualize_utils import (
+from utils import (
     VisualizeContext,
     get_key_nonblock,
     init_keyboard,
+    parse_human_sweep_request,
     restore_keyboard,
     should_stop,
 )
-from sweep_prompt_parser import parse_human_sweep_request
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_ros2_env import ARXRobotEnv  # noqa
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 
 
 def nav_dual_sweep(

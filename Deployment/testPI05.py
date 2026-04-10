@@ -17,11 +17,8 @@ if str(REPO_ROOT) not in sys.path:
 DEPLOYMENT_ROOT = Path(__file__).resolve().parent
 if str(DEPLOYMENT_ROOT) not in sys.path:
     sys.path.insert(0, str(DEPLOYMENT_ROOT))
-ROS2_ROOT = REPO_ROOT / "ARX_Realenv" / "ROS2"
-if str(ROS2_ROOT) not in sys.path:
-    sys.path.insert(0, str(ROS2_ROOT))
 
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
 from deployment_utils import (  # noqa: E402
     build_policy_observation,
     build_control_payload,

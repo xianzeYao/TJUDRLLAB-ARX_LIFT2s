@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
-from arx_pointing import predict_point_from_rgb
+from utils import predict_point_from_rgb
 
 
 COASTER_PROMPTS = [

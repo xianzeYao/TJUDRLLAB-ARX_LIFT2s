@@ -5,32 +5,32 @@ from typing import Mapping, Optional, Tuple, Literal
 import cv2
 import numpy as np
 
-from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb
-from demo_utils import (
+from utils import (
+    VisualizeContext,
+    dispatch_debug_image,
     execute_pick_place_cup_sequence,
     execute_pick_place_deepbox_sequence,
     execute_pick_place_normal_object_sequence,
     execute_pick_place_straw_sequence,
-)
-from point2pos_utils import (
     get_aligned_frames,
     pixel_to_ref_point_safe,
-)
-from task_completion_detector import (
+    predict_multi_points_from_rgb,
+    predict_point_from_rgb,
     prepare_task_completion_check,
-    run_task_completion_check,
-)
-from visualize_utils import (
-    VisualizeContext,
-    dispatch_debug_image,
     render_pick_place_debug_view,
+    run_task_completion_check,
     should_stop,
 )
 import time
 import sys
+from pathlib import Path
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
-from arx_ros2_env import ARXRobotEnv  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 
 
 def _set_gripper_at_current_eef(

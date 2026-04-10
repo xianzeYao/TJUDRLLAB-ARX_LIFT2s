@@ -17,8 +17,13 @@ from pathlib import Path
 import json
 import argparse
 import sys
-sys.path.append("../ROS2")  # noqa
-from arx_ros2_env import ARXRobotEnv
+
+THIS_DIR = Path(__file__).resolve().parent
+ROOT_DIR = THIS_DIR.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
 
 def rpy_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:

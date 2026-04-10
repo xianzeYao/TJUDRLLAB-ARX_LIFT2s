@@ -18,9 +18,9 @@ from base_calib_collect import (
 )
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
-if str(ROS2_DIR) not in sys.path:
-    sys.path.insert(0, str(ROS2_DIR))
+ROOT_DIR = THIS_DIR.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 DEFAULT_OUT_DIR = THIS_DIR / "Testdata4NavSpeed"
 DEFAULT_VX_CMD = 0.75
@@ -118,7 +118,7 @@ def main() -> None:
     session_name = datetime.now().strftime("session_%Y%m%d_%H%M%S")
     out_dir = ensure_output_dir(out_root / session_name)
 
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
     arx = ARXRobotEnv(
         duration_per_step=1.0 / 20.0,

@@ -4,16 +4,18 @@ import math
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 import threading
 
 import cv2
 import numpy as np
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_pointing import predict_multi_points_from_rgb
-from arx_ros2_env import ARXRobotEnv
-from demo_utils import estimate_lift_from_goal_z
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 from nav_goal import (
     _apply_roi_focus,
     _build_search_roi_polygon,
@@ -24,15 +26,17 @@ from nav_goal import (
     _select_goal_point,
     _vote_goal_presence,
 )
-from nav_utils import (
+from utils import (
     BASE_FORWARD_SPEED,
     BASE_ROTATE_SPEED,
     FORWARD_VX_CMD,
     ROTATE_VZ_CMD,
+    estimate_lift_from_goal_z,
+    get_aligned_frames,
+    predict_multi_points_from_rgb,
     recover_rotations,
     step_base_lift_duration,
 )
-from point2pos_utils import get_aligned_frames
 
 
 @dataclass

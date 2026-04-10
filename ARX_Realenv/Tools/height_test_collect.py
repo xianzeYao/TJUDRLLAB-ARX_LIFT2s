@@ -15,21 +15,17 @@ import sys
 
 THIS_DIR = Path(__file__).resolve().parent
 ROOT_DIR = THIS_DIR.parent.parent
-ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
-DEMO_DIR = (ROOT_DIR / "Demo").resolve()
-if str(ROS2_DIR) not in sys.path:
-    sys.path.insert(0, str(ROS2_DIR))
-if str(DEMO_DIR) not in sys.path:
-    sys.path.insert(0, str(DEMO_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-from arx_pointing import predict_multi_points_from_rgb  # noqa: E402
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
-from point2pos_utils import (  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
+from Demo.shelf_search import target_point_prompt  # noqa: E402
+from Demo.utils import (  # noqa: E402
     depth_to_meters,
     get_aligned_frames,
     pixel_to_base_point_safe,
+    predict_multi_points_from_rgb,
 )
-from shelf_search import target_point_prompt  # noqa: E402
 
 
 def _choose_goal_point(

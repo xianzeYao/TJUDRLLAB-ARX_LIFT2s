@@ -6,20 +6,28 @@ from __future__ import annotations
 import math
 import sys
 import time
+from pathlib import Path
 from typing import Literal, Optional
 
 import numpy as np
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_pointing import predict_multi_points_from_rgb
-from arx_ros2_env import ARXRobotEnv
-from demo_utils import estimate_lift_from_goal_z, step_base_duration
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 from nav_goal import (
     _vote_goal_presence,
     nav_to_goal,
 )
-from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
+from utils import (
+    estimate_lift_from_goal_z,
+    get_aligned_frames,
+    pixel_to_base_point_safe,
+    predict_multi_points_from_rgb,
+    step_base_duration,
+)
 from single_arm_pick_place import single_arm_pick_place
 
 # 与 nav_goal._select_goal_point(..., offset=...) 一致：像素→基座时 camera bias 的 y 分量（米）。

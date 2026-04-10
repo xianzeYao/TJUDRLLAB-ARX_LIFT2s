@@ -3,24 +3,31 @@ from __future__ import annotations
 import math
 import sys
 import time
+from pathlib import Path
 from typing import List, Optional
 
 import cv2
 import numpy as np
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_pointing import predict_multi_points_from_rgb
-from arx_ros2_env import ARXRobotEnv
-from demo_utils import estimate_lift_from_goal_z
-from nav_utils import execute_nav_actions, path_to_actions, recover_rotations
-from point2pos_utils import get_aligned_frames, pixel_to_base_point_safe
-from visualize_utils import (
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
+from utils import (
     VisualizeContext,
     dispatch_debug_image,
+    estimate_lift_from_goal_z,
+    execute_nav_actions,
+    get_aligned_frames,
     get_key_nonblock,
     init_keyboard,
+    path_to_actions,
+    pixel_to_base_point_safe,
+    predict_multi_points_from_rgb,
     render_nav_goal_debug_view,
+    recover_rotations,
     restore_keyboard,
     should_stop,
 )

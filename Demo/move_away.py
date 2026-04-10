@@ -11,22 +11,19 @@ from typing import Any, Literal, Optional
 import cv2
 import numpy as np
 
-CURRENT_DIR = Path(__file__).resolve().parent
-ROOT_DIR = CURRENT_DIR.parent
-ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.append(str(CURRENT_DIR))
-if str(ROS2_DIR) not in sys.path:
-    sys.path.append(str(ROS2_DIR))
-
-from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb  # noqa: E402
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
-from demo_utils import execute_move_away  # noqa: E402
-from point2pos_utils import get_aligned_frames, pixel_to_ref_point_safe  # noqa: E402
-from visualize_utils import (  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
+from utils import (  # noqa: E402
     VisualizeContext,
     dispatch_debug_image,
+    execute_move_away,
+    get_aligned_frames,
+    pixel_to_ref_point_safe,
+    predict_multi_points_from_rgb,
+    predict_point_from_rgb,
     render_move_away_debug_view,
     should_stop,
 )

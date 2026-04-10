@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
-if str(ROS2_DIR) not in sys.path:
-    sys.path.insert(0, str(ROS2_DIR))
+ROOT_DIR = THIS_DIR.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 WHEEL_RADIUS_M = 0.150
 CENTER_TO_WHEEL_M = 0.376
@@ -465,7 +465,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
     if args.duration < 0.0:
         raise ValueError("--duration must be >= 0")

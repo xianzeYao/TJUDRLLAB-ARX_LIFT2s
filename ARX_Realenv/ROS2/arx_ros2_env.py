@@ -5,8 +5,8 @@ import time
 from pathlib import Path
 import shlex
 import rclpy
-from arx_ros2_env_utils import *
-from arx_ros2_env_utils import _quat_from_rpy, _quat_multiply, _rpy_from_quat
+from .arx_ros2_env_utils import *
+from .arx_ros2_env_utils import _quat_from_rpy, _quat_multiply, _rpy_from_quat
 
 
 from arx5_arm_msg.msg._robot_cmd import RobotCmd

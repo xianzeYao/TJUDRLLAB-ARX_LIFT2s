@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Optional
 
 import numpy as np
-from arx_pointing import (
+from .arx_pointing import (
     predict_multi_points_from_multi_image,
     predict_multi_points_from_rgb,
 )
-from demo_utils import get_pick_close_target
+from .demo_utils import get_pick_close_target
 
 
 DEFAULT_HAND_CAMERA_BY_ARM = {

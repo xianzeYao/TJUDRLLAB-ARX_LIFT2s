@@ -27,11 +27,11 @@ import numpy as np
 import sys
 
 THIS_DIR = Path(__file__).resolve().parent
-ROS2_DIR = (THIS_DIR / "../ARX_Realenv/ROS2").resolve()
-if str(ROS2_DIR) not in sys.path:
-    sys.path.insert(0, str(ROS2_DIR))
+ROOT_DIR = THIS_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
 def find_color_frame(obs: dict, prefer_cam: str = "camera_h") -> tuple[Optional[str], Optional[np.ndarray]]:

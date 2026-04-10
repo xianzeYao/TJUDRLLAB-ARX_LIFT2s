@@ -5,12 +5,11 @@ import time
 from pathlib import Path
 
 
-CURRENT_DIR = Path(__file__).resolve().parent
-ROOT_DIR = CURRENT_DIR.parent
-sys.path.append(str(CURRENT_DIR))
-sys.path.append(str(ROOT_DIR / "ARX_Realenv" / "ROS2"))
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_ros2_env import ARXRobotEnv  # noqa
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 from single_arm_pick_place import single_arm_pick_place  # noqa
 
 

@@ -12,19 +12,14 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-CURRENT_DIR = Path(__file__).resolve().parent
-ROOT_DIR = CURRENT_DIR.parent
-ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.append(str(CURRENT_DIR))
-if str(ROS2_DIR) not in sys.path:
-    sys.path.append(str(ROS2_DIR))
-
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
 from nav_dual_sweep import nav_dual_sweep  # noqa: E402
 from smart_shelf_search import smart_shelf_search_from_request  # noqa: E402
-from visualize_utils import VisualizeContext  # noqa: E402
+from utils import VisualizeContext  # noqa: E402
 
 # Median depth sample count for nav target estimation in nav dual sweep.
 DEFAULT_NAV_DEPTH_MEDIAN_N = 5

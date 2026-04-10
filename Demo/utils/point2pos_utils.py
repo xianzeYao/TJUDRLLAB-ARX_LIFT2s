@@ -15,7 +15,7 @@ from typing import Literal, Tuple, List
 
 import numpy as np
 
-WORKSPACE = Path(__file__).resolve().parent.parent
+WORKSPACE = Path(__file__).resolve().parents[2]
 DEFAULT_INTRINSICS = WORKSPACE / "ARX_Realenv/Tools/instrinsics_camerah.json"
 DEFAULT_LEFT_EXTRINSICS = WORKSPACE / \
     "ARX_Realenv/Tools/extrinsics_cam_h_left.json"

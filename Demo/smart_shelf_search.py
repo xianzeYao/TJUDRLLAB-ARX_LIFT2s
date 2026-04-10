@@ -8,31 +8,27 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
-from demo_utils import (
+from utils import (
+    ShelfPromptTask,
+    VisualizeContext,
+    dispatch_debug_image,
+    get_aligned_frames,
+    parse_human_shelf_request,
+    pixel_to_base_point_safe,
+    predict_point_from_rgb,
+    render_pick_place_debug_view,
     step_base_duration,
 )
 from nav_goal import nav_to_goal
 from move_away import move_away
-from shelf_prompt_parser import ShelfPromptTask, parse_human_shelf_request
 from single_arm_pick_place import single_arm_pick_place
-from visualize_utils import (
-    VisualizeContext,
-    dispatch_debug_image,
-    render_pick_place_debug_view,
-    should_stop,
-)
+from utils import should_stop
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
-if str(ROS2_DIR) not in sys.path:
-    sys.path.append(str(ROS2_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_pointing import predict_point_from_rgb  # noqa: E402
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
-from point2pos_utils import (  # noqa: E402
-    get_aligned_frames,
-    pixel_to_base_point_safe,
-)
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
 PLACE_LATERAL_OFFSET_LEFT_Y = 0.125

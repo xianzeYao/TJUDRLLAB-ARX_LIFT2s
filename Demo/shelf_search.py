@@ -10,16 +10,14 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from arx_pointing import predict_multi_points_from_rgb
 from single_arm_pick_place import single_arm_pick_place
-from demo_utils import step_base_duration
+from utils import predict_multi_points_from_rgb, step_base_duration
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
-if str(ROS2_DIR) not in sys.path:
-    sys.path.append(str(ROS2_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
-from arx_ros2_env import ARXRobotEnv  # noqa: E402
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa: E402
 
 
 class UserAbortSearch(Exception):

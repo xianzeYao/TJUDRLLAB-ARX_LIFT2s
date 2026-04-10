@@ -1,5 +1,5 @@
 from __future__ import annotations
-from demo_utils import step_base_duration
+from utils import step_base_duration
 
 import heapq
 import re
@@ -9,17 +9,12 @@ from pathlib import Path
 from typing import Dict, List, Literal, TYPE_CHECKING, Tuple
 
 
-CURRENT_DIR = Path(__file__).resolve().parent
-ROOT_DIR = CURRENT_DIR.parent
-ROS2_DIR = ROOT_DIR / "ARX_Realenv" / "ROS2"
-
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.append(str(CURRENT_DIR))
-if str(ROS2_DIR) not in sys.path:
-    sys.path.append(str(ROS2_DIR))
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
 if TYPE_CHECKING:
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
 
 ColorName = Literal["green", "yellow", "blue"]
@@ -305,7 +300,7 @@ def multi_box(
 
 
 def main() -> None:
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
     arx = ARXRobotEnv(
         duration_per_step=1.0 / 20.0,

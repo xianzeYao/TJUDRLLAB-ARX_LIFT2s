@@ -10,19 +10,22 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from arx_pointing import predict_multi_points_from_rgb, predict_point_from_rgb
-from demo_utils import do_replan, draw_text_lines
-from motion_pick_place_cup import (
+from utils import (
     build_pick_cup_sequence,
     build_place_cup_sequence,
-)
-from point2pos_utils import (
+    do_replan,
+    draw_text_lines,
     get_aligned_frames,
     pixel_to_ref_point_safe,
+    predict_multi_points_from_rgb,
+    predict_point_from_rgb,
 )
 
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
-from arx_ros2_env import ARXRobotEnv  # noqa
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 
 COASTER_PROMPTS = [
     "the center of coaster (the left one near cups most)",

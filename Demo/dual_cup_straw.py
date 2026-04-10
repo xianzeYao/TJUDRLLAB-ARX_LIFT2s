@@ -1,10 +1,15 @@
 
 import time
 import sys
-sys.path.append("../ARX_Realenv/ROS2")  # noqa
-from arx_ros2_env import ARXRobotEnv  # noqa
+from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = CURRENT_DIR.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv  # noqa
 import numpy as np
-from demo_utils import step_base_duration
+from utils import step_base_duration
 from single_arm_pick_place import single_arm_pick_place
 
 OPEN = -3.4

@@ -11,12 +11,8 @@ from typing import Any, Optional
 
 THIS_DIR = Path(__file__).resolve().parent
 ROOT_DIR = THIS_DIR.parent.parent
-ROS2_DIR = (THIS_DIR / "../ROS2").resolve()
-DEMO_DIR = (ROOT_DIR / "Demo").resolve()
-if str(ROS2_DIR) not in sys.path:
-    sys.path.insert(0, str(ROS2_DIR))
-if str(DEMO_DIR) not in sys.path:
-    sys.path.insert(0, str(DEMO_DIR))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from base_calib_collect import (
     CENTER_TO_WHEEL_M,
@@ -63,7 +59,7 @@ def choose_goal_point(
     offset: float,
     prev_pixel: Optional[tuple[int, int]],
 ):
-    from point2pos_utils import depth_to_meters, pixel_to_base_point_safe
+    from Demo.utils import depth_to_meters, pixel_to_base_point_safe
     import numpy as np
 
     valid_goals = []
@@ -114,9 +110,8 @@ def detect_goal_once(
     offset: float,
     prev_pixel: Optional[tuple[int, int]],
 ):
-    from arx_pointing import predict_multi_points_from_rgb
-    from point2pos_utils import get_aligned_frames
-    from shelf_search import target_point_prompt
+    from Demo.shelf_search import target_point_prompt
+    from Demo.utils import get_aligned_frames, predict_multi_points_from_rgb
 
     color, depth = get_aligned_frames(arx, depth_median_n=depth_median_n)
     if color is None or depth is None:
@@ -209,7 +204,7 @@ def main() -> None:
     if args.depth_median_n <= 0:
         raise ValueError("--depth-median-n must be > 0")
 
-    from arx_ros2_env import ARXRobotEnv
+    from ARX_Realenv.ROS2.arx_ros2_env import ARXRobotEnv
 
     out_dir = ensure_output_dir(args.out)
     robot_type, robot_type_source = query_robot_type()

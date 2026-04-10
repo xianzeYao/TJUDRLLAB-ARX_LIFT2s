@@ -88,7 +88,7 @@ def _predict_points(
     all_prompt: Optional[str],
     config: ERModelConfig,
 ) -> tuple[list[tuple[float, float]], Optional[str]]:
-    from arx_pointing import (
+    from utils import (
         predict_multi_points_from_multi_image,
         predict_multi_points_from_rgb,
     )
