@@ -315,6 +315,7 @@ def smart_shelf_search(
                 depth_median_n=depth_median_n,
                 verify_completion=True,
                 completion_retry_attempts=0,
+                completion_ignore_exit_failure=True,
                 visualize=visualize,
             )
         else:
@@ -328,11 +329,14 @@ def smart_shelf_search(
                 depth_median_n=depth_median_n,
                 verify_completion=True,
                 completion_retry_attempts=0,
+                completion_ignore_exit_failure=True,
                 visualize=visualize,
             )
         if pick_arm is None:
             stopped = should_stop(visualize)
             status = "stopped" if stopped else "failed"
+            if not stopped:
+                step_base_duration(arx, 0.0, 0.0, -1.0, duration=7)
             message = (
                 "stopped during pick"
                 if stopped

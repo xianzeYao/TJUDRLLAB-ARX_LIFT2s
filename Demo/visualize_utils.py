@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import queue
 import select
 import sys
 import termios
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
@@ -164,6 +166,111 @@ class VisualizeContext:
     stop_checker: Optional[Callable[[], bool]] = None
 
 
+_DEBUG_WINDOW_PENDING = object()
+
+
+@dataclass
+class _DebugWindowRequest:
+    image: np.ndarray
+    window_name: str
+    stop_checker: Optional[Callable[[], bool]] = None
+    done_event: threading.Event = field(default_factory=threading.Event)
+    response: object = _DEBUG_WINDOW_PENDING
+
+
+_DEBUG_WINDOW_QUEUE: "queue.Queue[Optional[_DebugWindowRequest]]" = queue.Queue(
+)
+_DEBUG_WINDOW_THREAD: Optional[threading.Thread] = None
+_DEBUG_WINDOW_LOCK = threading.Lock()
+
+
+def _run_debug_image_interaction(
+    image: np.ndarray,
+    *,
+    window_name: str,
+    stop_checker: Optional[Callable[[], bool]] = None,
+) -> Literal[True, False, None]:
+    try:
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.imshow(window_name, image)
+    except cv2.error as exc:
+        print(
+            f"[visualize_utils] debug window {window_name!r} unavailable: {exc}; auto-accept"
+        )
+        return True
+    while True:
+        if stop_checker is not None:
+            try:
+                if stop_checker():
+                    cv2.destroyWindow(window_name)
+                    return None
+            except Exception:
+                pass
+        key = get_key_nonblock()
+        if key == "q":
+            cv2.destroyWindow(window_name)
+            return None
+        if key == "r":
+            cv2.destroyWindow(window_name)
+            return False
+        if key == "e":
+            cv2.destroyWindow(window_name)
+            return True
+
+        try:
+            cv_key = cv2.waitKey(50)
+        except cv2.error as exc:
+            print(
+                f"[visualize_utils] debug waitKey failed for {window_name!r}: {exc}; auto-accept"
+            )
+            cv2.destroyWindow(window_name)
+            return True
+        if cv_key < 0:
+            continue
+
+        if cv_key == ord("q"):
+            cv2.destroyWindow(window_name)
+            return None
+        if cv_key == ord("r"):
+            cv2.destroyWindow(window_name)
+            return False
+        if cv_key == ord("e"):
+            cv2.destroyWindow(window_name)
+            return True
+        continue
+
+
+def _debug_window_worker() -> None:
+    while True:
+        request = _DEBUG_WINDOW_QUEUE.get()
+        if request is None:
+            _DEBUG_WINDOW_QUEUE.task_done()
+            break
+        try:
+            request.response = _run_debug_image_interaction(
+                request.image,
+                window_name=request.window_name,
+                stop_checker=request.stop_checker,
+            )
+        finally:
+            request.done_event.set()
+            _DEBUG_WINDOW_QUEUE.task_done()
+
+
+def _ensure_debug_window_thread() -> threading.Thread:
+    global _DEBUG_WINDOW_THREAD
+    with _DEBUG_WINDOW_LOCK:
+        if _DEBUG_WINDOW_THREAD is not None and _DEBUG_WINDOW_THREAD.is_alive():
+            return _DEBUG_WINDOW_THREAD
+        _DEBUG_WINDOW_THREAD = threading.Thread(
+            target=_debug_window_worker,
+            name="opencv-debug-window",
+            daemon=True,
+        )
+        _DEBUG_WINDOW_THREAD.start()
+        return _DEBUG_WINDOW_THREAD
+
+
 def _draw_debug_panel(
     image: np.ndarray,
     lines: list[str],
@@ -233,41 +340,30 @@ def confirm_debug_image(
     window_name: str,
     stop_checker: Optional[Callable[[], bool]] = None,
 ) -> Literal[True, False, None]:
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.imshow(window_name, image)
-    while True:
-        if stop_checker is not None:
-            try:
-                if stop_checker():
-                    cv2.destroyWindow(window_name)
-                    return None
-            except Exception:
-                pass
-        key = get_key_nonblock()
-        if key == "q":
-            cv2.destroyWindow(window_name)
-            return None
-        if key == "r":
-            cv2.destroyWindow(window_name)
-            return False
-        if key == "e":
-            cv2.destroyWindow(window_name)
-            return True
+    if threading.current_thread() is threading.main_thread():
+        return _run_debug_image_interaction(
+            image,
+            window_name=window_name,
+            stop_checker=stop_checker,
+        )
 
-        cv_key = cv2.waitKey(50)
-        if cv_key < 0:
-            continue
-
-        if cv_key == ord("q"):
-            cv2.destroyWindow(window_name)
-            return None
-        if cv_key == ord("r"):
-            cv2.destroyWindow(window_name)
-            return False
-        if cv_key == ord("e"):
-            cv2.destroyWindow(window_name)
-            return True
-        continue
+    print(
+        f"[visualize_utils] route debug window {window_name!r} to OpenCV UI thread"
+    )
+    _ensure_debug_window_thread()
+    request = _DebugWindowRequest(
+        image=image.copy(),
+        window_name=window_name,
+        stop_checker=stop_checker,
+    )
+    _DEBUG_WINDOW_QUEUE.put(request)
+    request.done_event.wait()
+    response = request.response
+    if response is _DEBUG_WINDOW_PENDING:
+        raise RuntimeError(
+            f"debug window {window_name!r} finished without a response"
+        )
+    return response
 
 
 def dispatch_debug_image(
@@ -279,13 +375,7 @@ def dispatch_debug_image(
     window_name: str,
     **payload: Any,
 ) -> Literal[True, False, None]:
-    emit_debug_image(
-        visualize,
-        source=source,
-        panel=panel,
-        image=image,
-        **payload,
-    )
+
     stop_checker = None if visualize is None else visualize.stop_checker
     return confirm_debug_image(
         image,

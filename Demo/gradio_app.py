@@ -37,7 +37,7 @@ DEFAULT_NAV_LOCAL_DEBUG = True
 # Whether nav dual sweep keeps the original local swap debug flow enabled.
 DEFAULT_SWAP_LOCAL_DEBUG = True
 # Fixed stop distance used by nav dual sweep from the Gradio wrapper.
-DEFAULT_NAV_DISTANCE = 0.55
+DEFAULT_NAV_DISTANCE = 0.535
 # Fixed lift height used before nav dual sweep navigation.
 DEFAULT_NAV_LIFT_HEIGHT = 0.0
 

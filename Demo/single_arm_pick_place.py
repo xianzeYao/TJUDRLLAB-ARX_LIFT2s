@@ -366,6 +366,7 @@ def single_arm_pick_place(
     completion_settle_s: float = 1.0,
     completion_capture_retries: int = 1,
     completion_capture_retry_sleep_s: float = 0.2,
+    completion_ignore_exit_failure: bool = False,
     visualize: Optional[VisualizeContext] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Literal["left", "right"]]]:
     try:
@@ -501,10 +502,26 @@ def single_arm_pick_place(
                 )
 
             if check_result.next_action == "exit":
+                if completion_ignore_exit_failure:
+                    print(
+                        f"[pick_place][{completion_check_mode}] ignore exit failure and continue"
+                    )
+                    return _finish_pick_place_success(
+                        arx=arx,
+                        last_result=last_result,
+                        item_type=item_type,
+                        arm=arm,
+                        do_place=do_place,
+                        release_after_pick=release_after_pick,
+                        pick_prompt=pick_prompt,
+                        place_prompt=place_prompt,
+                        visualize=visualize,
+                    )
                 return last_result[0], last_result[1], None
 
             if retry_limit is not None and retry_idx >= retry_limit:
-                print(f"[pick_place][{completion_check_mode}] retry limit reached, stop retry")
+                print(
+                    f"[pick_place][{completion_check_mode}] retry limit reached, stop retry")
                 return last_result
 
             if check_result.next_action == "open_close_retry":

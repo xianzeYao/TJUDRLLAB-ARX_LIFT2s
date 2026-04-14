@@ -161,6 +161,7 @@ def nav_to_goal(
     rotating_search = False
     consecutive_true_count = 0
     consecutive_true_required = 3
+    emergency_stop_requested = False
 
     def _log(message: str, *, stage: Optional[str] = None, **payload) -> None:
         del stage, payload
@@ -181,10 +182,14 @@ def nav_to_goal(
         rotating_search = False
 
     def _check_nav_emergency_stop() -> bool:
+        nonlocal emergency_stop_requested
         if should_stop(visualize):
             return True
         key = get_key_nonblock()
-        return key == "n"
+        if key == "n":
+            emergency_stop_requested = True
+            return True
+        return False
 
     try:
         arx.step_lift(lift_height)
@@ -197,8 +202,11 @@ def nav_to_goal(
             if key == "n":
                 _stop_rotate_search()
                 arx.step_base(0.0, 0.0, 0.0)
-                _log("Emergency stop received.", stage="stopped")
-                return last_result
+                emergency_stop_requested = False
+                _log("Emergency stop received, continue navigation.",
+                     stage="emergency_stop")
+                time.sleep(0.1)
+                continue
 
             frames = arx.get_camera(target_size=(
                 640, 480), return_status=False)
@@ -348,8 +356,22 @@ def nav_to_goal(
             )
             if interrupted:
                 _stop_rotate_search()
-                _log("Emergency stop received.", stage="stopped")
-                return last_result
+                if should_stop(visualize):
+                    _log("Stop signal received.", stage="stopped")
+                    return last_result
+                if emergency_stop_requested:
+                    emergency_stop_requested = False
+                    arx.step_base(0.0, 0.0, 0.0)
+                    _log(
+                        "Emergency stop received, continue navigation.",
+                        stage="emergency_stop",
+                    )
+                    time.sleep(0.1)
+                    continue
+                _log("Navigation interrupted, continue navigation.",
+                     stage="interrupted")
+                time.sleep(0.1)
+                continue
             if rotate_recover:
                 recover_rotations(arx, executed_rotations)
             last_result = (goal_pw, actions)
