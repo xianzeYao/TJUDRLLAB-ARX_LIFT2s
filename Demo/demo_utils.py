@@ -367,6 +367,8 @@ def execute_pick_place_hug_sequence(
     right_ref: Optional[np.ndarray],
     do_pick: bool = True,
     do_place: bool = False,
+    left_pose: Optional[np.ndarray] = None,
+    right_pose: Optional[np.ndarray] = None,
 ) -> None:
     """执行 hug 抓取/放置动作序列。
     注意pick 和 place 不能同时执行。
@@ -384,7 +386,16 @@ def execute_pick_place_hug_sequence(
             raise ValueError("left_ref 为空")
         if right_ref is None:
             raise ValueError("right_ref 为空")
-        place_seq = build_place_hug_sequence(left_ref=left_ref, right_ref=right_ref)
+        if left_pose is None:
+            raise ValueError("left_pose 为空，place 需要当前左臂末端姿态")
+        if right_pose is None:
+            raise ValueError("right_pose 为空，place 需要当前右臂末端姿态")
+        place_seq = build_place_hug_sequence(
+            left_ref=left_ref,
+            right_ref=right_ref,
+            left_pose=left_pose,
+            right_pose=right_pose,
+        )
         for act in place_seq:
             arx.step_smooth_eef(act)
 
